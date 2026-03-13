@@ -1,9 +1,11 @@
+import json
 from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from src.db.models import BodyComposition
+from src.db.models import BodyComposition, BodySegment
 from src.utils.time import today
 
 
@@ -14,6 +16,11 @@ async def log_body_composition(
     body_fat_pct: float | None = None,
     weight_kg: float | None = None,
     muscle_mass_kg: float | None = None,
+    visceral_fat_level: int | None = None,
+    bmr: int | None = None,
+    score: int | None = None,
+    inbody_data: dict | None = None,
+    segments: list[dict] | None = None,
     notes: str | None = None,
 ) -> dict[str, object]:
     record = BodyComposition(
@@ -22,18 +29,43 @@ async def log_body_composition(
         body_fat_pct=body_fat_pct,
         weight_kg=weight_kg,
         muscle_mass_kg=muscle_mass_kg,
+        visceral_fat_level=visceral_fat_level,
+        bmr=bmr,
+        score=score,
+        inbody_data=json.dumps(inbody_data, ensure_ascii=False) if inbody_data else None,
         notes=notes,
     )
     db.add(record)
     await db.flush()
 
-    return {
+    if segments:
+        for seg in segments:
+            db.add(BodySegment(
+                body_composition_id=record.id,
+                segment=seg["segment"],
+                muscle_mass_kg=seg.get("muscle_mass_kg"),
+                muscle_grade=seg.get("muscle_grade"),
+                fat_mass_kg=seg.get("fat_mass_kg"),
+                fat_grade=seg.get("fat_grade"),
+            ))
+        await db.flush()
+
+    result: dict[str, object] = {
         "id": record.id,
         "date": measurement_date.isoformat(),
         "body_fat_pct": body_fat_pct,
         "weight_kg": weight_kg,
         "muscle_mass_kg": muscle_mass_kg,
     }
+    if visceral_fat_level is not None:
+        result["visceral_fat_level"] = visceral_fat_level
+    if bmr is not None:
+        result["bmr"] = bmr
+    if score is not None:
+        result["score"] = score
+    if segments:
+        result["segments"] = segments
+    return result
 
 
 async def get_body_composition_history(
@@ -45,6 +77,7 @@ async def get_body_composition_history(
 
     result = await db.execute(
         select(BodyComposition)
+        .options(selectinload(BodyComposition.segments))
         .where(
             BodyComposition.user_id == user_id,
             BodyComposition.date >= cutoff,
@@ -53,16 +86,36 @@ async def get_body_composition_history(
     )
     records = result.scalars().all()
 
-    return [
-        {
-            "date": r.date.isoformat(),
-            "body_fat_pct": r.body_fat_pct,
-            "weight_kg": r.weight_kg,
-            "muscle_mass_kg": r.muscle_mass_kg,
-            "notes": r.notes,
-        }
-        for r in records
-    ]
+    return [_record_to_dict(r) for r in records]
+
+
+def _record_to_dict(r: BodyComposition) -> dict[str, object]:
+    d: dict[str, object] = {
+        "date": r.date.isoformat(),
+        "body_fat_pct": r.body_fat_pct,
+        "weight_kg": r.weight_kg,
+        "muscle_mass_kg": r.muscle_mass_kg,
+    }
+    if r.visceral_fat_level is not None:
+        d["visceral_fat_level"] = r.visceral_fat_level
+    if r.bmr is not None:
+        d["bmr"] = r.bmr
+    if r.score is not None:
+        d["score"] = r.score
+    if r.segments:
+        d["segments"] = [
+            {
+                "segment": s.segment,
+                "muscle_mass_kg": s.muscle_mass_kg,
+                "muscle_grade": s.muscle_grade,
+                "fat_mass_kg": s.fat_mass_kg,
+                "fat_grade": s.fat_grade,
+            }
+            for s in r.segments
+        ]
+    if r.notes:
+        d["notes"] = r.notes
+    return d
 
 
 async def get_body_composition_summary(

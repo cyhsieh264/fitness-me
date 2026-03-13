@@ -35,6 +35,8 @@ class User(Base):
     body_compositions: Mapped[list["BodyComposition"]] = relationship(back_populates="user")
     daily_interactions: Mapped[list["DailyInteraction"]] = relationship(back_populates="user")
     chat_messages: Mapped[list["ChatMessage"]] = relationship(back_populates="user")
+    goals: Mapped[list["UserGoal"]] = relationship(back_populates="user")
+    images: Mapped[list["UserImage"]] = relationship(back_populates="user")
 
 
 class UserProfile(Base):
@@ -231,9 +233,47 @@ class BodyComposition(Base):
     body_fat_pct: Mapped[float | None] = mapped_column(Float)
     weight_kg: Mapped[float | None] = mapped_column(Float)
     muscle_mass_kg: Mapped[float | None] = mapped_column(Float)
+    visceral_fat_level: Mapped[int | None] = mapped_column(Integer)
+    bmr: Mapped[int | None] = mapped_column(Integer)
+    score: Mapped[int | None] = mapped_column(Integer)
+    inbody_data: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
 
     user: Mapped["User"] = relationship(back_populates="body_compositions")
+    segments: Mapped[list["BodySegment"]] = relationship(back_populates="body_composition")
+
+
+class BodySegment(Base):
+    __tablename__ = "body_segments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    body_composition_id: Mapped[int] = mapped_column(
+        ForeignKey("body_compositions.id"), nullable=False
+    )
+    segment: Mapped[str] = mapped_column(String, nullable=False)
+    muscle_mass_kg: Mapped[float | None] = mapped_column(Float)
+    muscle_grade: Mapped[str | None] = mapped_column(String)
+    fat_mass_kg: Mapped[float | None] = mapped_column(Float)
+    fat_grade: Mapped[str | None] = mapped_column(String)
+
+    body_composition: Mapped["BodyComposition"] = relationship(back_populates="segments")
+
+
+class UserGoal(Base):
+    __tablename__ = "user_goals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    target_value: Mapped[float | None] = mapped_column(Float)
+    target_unit: Mapped[str | None] = mapped_column(String)
+    deadline: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String, default="active")
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    achieved_at: Mapped[int | None] = mapped_column(Integer)
+
+    user: Mapped["User"] = relationship(back_populates="goals")
 
 
 class DailyInteraction(Base):
@@ -263,3 +303,17 @@ class ChatMessage(Base):
     created_at: Mapped[int] = mapped_column(Integer, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="chat_messages")
+
+
+class UserImage(Base):
+    __tablename__ = "user_images"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    image_path: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="images")
