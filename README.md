@@ -28,15 +28,46 @@ uv run python -m scripts.seed
 
 ### Import historical records
 
-Parses `specs/spec-001/raw-fitness-record` using LLM and imports into the database. Requires `LLM_API_KEY` in `.env`.
-
 ```bash
 uv run python -m scripts.import_history <LINE_USER_ID>
 ```
 
-- Seeds exercise database first if not already done
-- 51 date blocks, ~3.5 min total (4s interval for Gemini free tier rate limit)
-- Generates `data/fitness.db` with sessions, exercises, sets, PRs, and conditions
+Parses `specs/spec-001/raw-fitness-record` using LLM. Seeds exercise DB first if needed.
+
+## Admin API
+
+Requires `ADMIN_TOKEN` env var. All requests must include `X-Admin-Token` header.
+
+### Download database
+
+```bash
+curl -o fitness.db https://your-server.com/admin/download-db \
+  -H "X-Admin-Token: $ADMIN_TOKEN"
+```
+
+Returns a consistent SQLite snapshot of the current database.
+
+### Import historical records (remote)
+
+File upload (recommended):
+
+```bash
+curl -X POST https://your-server.com/admin/import-history \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -F "line_user_id=U..." \
+  -F "file=@records.txt"
+```
+
+Or JSON body:
+
+```bash
+curl -X POST https://your-server.com/admin/import-history \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"line_user_id": "U...", "raw_text": "..."}'
+```
+
+Records older than 2 years are automatically skipped (configurable via `cutoff_years`).
 
 ## Test
 
