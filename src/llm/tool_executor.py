@@ -6,7 +6,16 @@ from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.services import body_comp, cardio, condition, profile, recommender, workout
+from src.services import (
+    body_comp,
+    cardio,
+    condition,
+    goals,
+    images,
+    profile,
+    recommender,
+    workout,
+)
 from src.utils.time import today
 
 logger = logging.getLogger(__name__)
@@ -160,6 +169,11 @@ async def _log_body_composition(db: AsyncSession, user_id: int, args: dict) -> d
         body_fat_pct=args.get("body_fat_pct"),
         weight_kg=args.get("weight_kg"),
         muscle_mass_kg=args.get("muscle_mass_kg"),
+        visceral_fat_level=args.get("visceral_fat_level"),
+        bmr=args.get("bmr"),
+        score=args.get("score"),
+        inbody_data=args.get("inbody_data"),
+        segments=args.get("segments"),
         notes=args.get("notes"),
     )
     return result
@@ -168,6 +182,8 @@ async def _log_body_composition(db: AsyncSession, user_id: int, args: dict) -> d
 async def _query_body_composition(db: AsyncSession, user_id: int, args: dict) -> dict:
     days = args.get("days", 90)
     summary = await body_comp.get_body_composition_summary(db, user_id, days)
+    if args.get("latest_only"):
+        return {"summary": summary}
     history = await body_comp.get_body_composition_history(db, user_id, days)
     return {"summary": summary, "records": history}
 
@@ -178,6 +194,49 @@ async def _query_cardio_progress(db: AsyncSession, user_id: int, args: dict) -> 
     summary = await cardio.get_cardio_summary(db, user_id, days, cardio_type)
     history = await cardio.get_cardio_history(db, user_id, days, cardio_type)
     return {"summary": summary, "records": history}
+
+
+async def _query_user_images(db: AsyncSession, user_id: int, args: dict) -> dict:
+    history = await images.get_image_history(
+        db, user_id, category=args.get("category"), limit=args.get("limit", 10),
+    )
+    if args.get("include_urls"):
+        for img in history:
+            url_info = await images.get_image_url(db, user_id, img["id"])
+            if "url" in url_info:
+                img["url"] = url_info["url"]
+    return {"images": history}
+
+
+async def _manage_goal(db: AsyncSession, user_id: int, args: dict) -> dict:
+    action = args["action"]
+    deadline_ts = None
+    if args.get("deadline"):
+        deadline_ts = int(date.fromisoformat(args["deadline"]).strftime("%s"))
+
+    if action == "create":
+        return await goals.set_goal(
+            db,
+            user_id=user_id,
+            category=args["category"],
+            description=args["description"],
+            target_value=args.get("target_value"),
+            target_unit=args.get("target_unit"),
+            deadline=deadline_ts,
+        )
+
+    # update / achieve / abandon
+    status_map = {"achieve": "achieved", "abandon": "abandoned"}
+    status = status_map.get(action, args.get("status"))
+    return await goals.update_goal(
+        db,
+        user_id=user_id,
+        goal_id=args["goal_id"],
+        status=status,
+        description=args.get("description"),
+        target_value=args.get("target_value"),
+        deadline=deadline_ts,
+    )
 
 
 async def _update_daily_plan(db: AsyncSession, user_id: int, args: dict) -> dict:
@@ -202,5 +261,7 @@ _HANDLERS = {
     "log_body_composition": _log_body_composition,
     "query_body_composition": _query_body_composition,
     "query_cardio_progress": _query_cardio_progress,
+    "query_user_images": _query_user_images,
+    "manage_goal": _manage_goal,
     "update_daily_plan": _update_daily_plan,
 }

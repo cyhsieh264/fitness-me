@@ -369,8 +369,8 @@ TOOLS = [
         "function": {
             "name": "log_body_composition",
             "description": (
-                "Record body composition data. "
-                "Call when user reports body fat, weight, or muscle mass."
+                "Record body composition data (manual input or InBody report). "
+                "Call when user reports body fat, weight, muscle mass, or InBody results."
             ),
             "parameters": {
                 "type": "object",
@@ -389,7 +389,64 @@ TOOLS = [
                     },
                     "muscle_mass_kg": {
                         "type": "number",
-                        "description": "Muscle mass in kg",
+                        "description": "Skeletal muscle mass in kg",
+                    },
+                    "visceral_fat_level": {
+                        "type": "integer",
+                        "description": "Visceral fat level (1-20)",
+                    },
+                    "bmr": {
+                        "type": "integer",
+                        "description": "Basal metabolic rate (kcal)",
+                    },
+                    "score": {
+                        "type": "integer",
+                        "description": "InBody total score",
+                    },
+                    "segments": {
+                        "type": "array",
+                        "description": "Body segment analysis (from InBody)",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "segment": {
+                                    "type": "string",
+                                    "enum": [
+                                        "left_arm",
+                                        "right_arm",
+                                        "trunk",
+                                        "left_leg",
+                                        "right_leg",
+                                    ],
+                                },
+                                "muscle_mass_kg": {
+                                    "type": "number",
+                                    "description": "Segment muscle mass in kg",
+                                },
+                                "muscle_grade": {
+                                    "type": "string",
+                                    "enum": ["below", "standard", "above"],
+                                    "description": "Muscle development grade",
+                                },
+                                "fat_mass_kg": {
+                                    "type": "number",
+                                    "description": "Segment fat mass in kg",
+                                },
+                                "fat_grade": {
+                                    "type": "string",
+                                    "enum": ["below", "standard", "above"],
+                                    "description": "Fat level grade",
+                                },
+                            },
+                            "required": ["segment"],
+                        },
+                    },
+                    "inbody_data": {
+                        "type": "object",
+                        "description": (
+                            "Additional InBody data as JSON (BMI, body water, "
+                            "ideal weight, ideal body fat, protein, etc.)"
+                        ),
                     },
                     "notes": {"type": "string"},
                 },
@@ -402,7 +459,8 @@ TOOLS = [
             "name": "query_body_composition",
             "description": (
                 "Query body composition history. "
-                "Call when user asks about body fat or weight trends."
+                "Call when user asks about body fat or weight trends. "
+                "Use latest_only=true when you just need the most recent data for reference."
             ),
             "parameters": {
                 "type": "object",
@@ -410,6 +468,10 @@ TOOLS = [
                     "days": {
                         "type": "integer",
                         "description": "Days to look back (default 90)",
+                    },
+                    "latest_only": {
+                        "type": "boolean",
+                        "description": "Return only summary with latest measurement (saves tokens)",
                     },
                 },
             },
@@ -433,6 +495,88 @@ TOOLS = [
                         "description": "Filter by type (omit for all)",
                     },
                 },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_user_images",
+            "description": (
+                "Query user's saved images (InBody reports, progress photos, etc). "
+                "Returns id, category, date, and description. "
+                "Set include_urls=true to get secure URLs for sending images back to user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": ["inbody", "progress", "meal", "other"],
+                        "description": "Filter by category (omit for all)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results (default 10)",
+                    },
+                    "include_urls": {
+                        "type": "boolean",
+                        "description": (
+                            "Include secure URLs for each image (for sending to user). "
+                            "Default false to save tokens."
+                        ),
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_goal",
+            "description": (
+                "Create, update, or close a fitness goal. "
+                "action=create: new goal (requires category + description). "
+                "action=update/achieve/abandon: modify existing goal (requires goal_id)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "update", "achieve", "abandon"],
+                    },
+                    "goal_id": {
+                        "type": "integer",
+                        "description": "Required for update/achieve/abandon",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["body_comp", "strength", "habit", "general"],
+                        "description": (
+                            "Required for create. "
+                            "body_comp=weight/fat/muscle, strength=lift targets, "
+                            "habit=frequency/routine, general=other"
+                        ),
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Goal description in user's language",
+                    },
+                    "target_value": {
+                        "type": "number",
+                        "description": "Numeric target (e.g. 22.0 for body fat 22%)",
+                    },
+                    "target_unit": {
+                        "type": "string",
+                        "description": "Unit: %, kg, sessions_per_week, min, etc.",
+                    },
+                    "deadline": {
+                        "type": "string",
+                        "description": "Target date YYYY-MM-DD (omit if open-ended)",
+                    },
+                },
+                "required": ["action"],
             },
         },
     },
