@@ -100,8 +100,18 @@ async def check_and_send_missed_push() -> None:
     await _daily_push_job()
 
 
+async def _backup_job() -> None:
+    """Run daily database backup."""
+    from src.services.backup import backup_database
+
+    try:
+        await backup_database()
+    except Exception:
+        logger.exception("Database backup failed")
+
+
 def start_scheduler() -> None:
-    """Start the scheduler with daily push and cleanup jobs."""
+    """Start the scheduler with daily push, cleanup, and backup jobs."""
     scheduler.add_job(
         _daily_push_job,
         CronTrigger(hour=8, minute=0, jitter=3600, timezone=settings.timezone),
@@ -114,8 +124,16 @@ def start_scheduler() -> None:
         id="daily_cleanup",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _backup_job,
+        CronTrigger(hour=3, minute=0, timezone=settings.timezone),
+        id="daily_backup",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler started: daily_push (08:00+jitter), daily_cleanup (23:59)")
+    logger.info(
+        "Scheduler started: daily_push (08:00+jitter), daily_cleanup (23:59), daily_backup (03:00)"
+    )
 
 
 def stop_scheduler() -> None:

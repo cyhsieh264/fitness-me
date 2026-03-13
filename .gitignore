@@ -8,6 +8,8 @@ venv/
 specs/
 .env
 data/*.db
+data/backups/
+data/images/
 *.sqlite3
 .ruff_cache/
 .pytest_cache/
