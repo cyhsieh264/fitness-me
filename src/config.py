@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     # App
     allowed_user_ids: str = ""
     timezone: str = "Asia/Taipei"
+    base_url: str = ""
+    admin_token: str = ""
 
     @property
     def allowed_user_id_list(self) -> list[str]:
