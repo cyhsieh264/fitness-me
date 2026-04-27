@@ -7,9 +7,8 @@ from linebot.v3 import WebhookParser
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import ImageMessageContent, MessageEvent, TextMessageContent
 
+from scripts.seed import run_seed
 from src.config import settings
-from src.db.database import engine
-from src.db.models import Base
 from src.line.handler import handle_image_message, handle_text_message
 from src.services.import_records import run_import
 from src.services.scheduler import check_and_send_missed_push, start_scheduler, stop_scheduler
@@ -25,9 +24,9 @@ parser = WebhookParser(settings.line_channel_secret)
 
 @app.on_event("startup")
 async def startup() -> None:
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables created")
+    # run_seed() creates tables and idempotently inserts the exercise/muscle
+    # dictionary. Safe to run on every boot — no-ops once the data is there.
+    await run_seed()
     start_scheduler()
     await check_and_send_missed_push()
 
