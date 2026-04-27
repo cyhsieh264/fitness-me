@@ -79,8 +79,6 @@ PROFILE & GOAL MANAGEMENT:
   If a goal is achieved, celebrate and call manage_goal(action="achieve", goal_id=...).
 - When user says they're giving up or changing a goal, call manage_goal(action="abandon")
   and optionally manage_goal(action="create") for the new one.
-- Also call update_user_profile to keep fitness_goals as a brief summary of current direction
-  (e.g. "cutting phase, focusing on deficit + cardio").
 - When giving training suggestions, prioritize current goals over historical patterns.
   Past data is for reference, not for dictating future plans.
 

@@ -28,7 +28,16 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
-    profile: Mapped["UserProfile | None"] = relationship(back_populates="user", uselist=False)
+    # Fitness profile fields (formerly user_profile table). Concrete, structured
+    # goals live in user_goals; this is just stable context the LLM injects into
+    # the system prompt.
+    training_habit: Mapped[str | None] = mapped_column(Text)
+    cardio_status: Mapped[str | None] = mapped_column(Text)
+    target_body_fat_pct: Mapped[float | None] = mapped_column(Float)
+    target_max_hr: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+    profile_updated_at: Mapped[int | None] = mapped_column(BigInteger)
+
     conditions: Mapped[list["UserCondition"]] = relationship(back_populates="user")
     raw_records: Mapped[list["RawRecord"]] = relationship(back_populates="user")
     training_sessions: Mapped[list["TrainingSession"]] = relationship(back_populates="user")
@@ -38,22 +47,6 @@ class User(Base):
     chat_messages: Mapped[list["ChatMessage"]] = relationship(back_populates="user")
     goals: Mapped[list["UserGoal"]] = relationship(back_populates="user")
     images: Mapped[list["UserImage"]] = relationship(back_populates="user")
-
-
-class UserProfile(Base):
-    __tablename__ = "user_profile"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, nullable=False)
-    fitness_goals: Mapped[str | None] = mapped_column(Text)
-    training_habit: Mapped[str | None] = mapped_column(Text)
-    cardio_status: Mapped[str | None] = mapped_column(Text)
-    target_body_fat_pct: Mapped[float | None] = mapped_column(Float)
-    target_max_hr: Mapped[int | None] = mapped_column(Integer)
-    notes: Mapped[str | None] = mapped_column(Text)
-    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
-
-    user: Mapped["User"] = relationship(back_populates="profile")
 
 
 class UserCondition(Base):

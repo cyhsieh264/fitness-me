@@ -122,14 +122,14 @@ async def test_update_user_profile(db: AsyncSession, user: User):
             user.id,
             "update_user_profile",
             {
-                "fitness_goals": "Gain muscle",
                 "training_habit": "3x per week",
+                "cardio_status": "low fitness, HR spikes",
             },
         )
     )
 
-    assert "fitness_goals" in result
-    assert result["fitness_goals"] == "Gain muscle"
+    assert result["training_habit"] == "3x per week"
+    assert result["cardio_status"] == "low fitness, HR spikes"
 
 
 async def test_query_exercise_notes(

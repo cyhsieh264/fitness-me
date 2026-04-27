@@ -40,7 +40,6 @@ Authoritative source: `src/db/models.py`. This diagram is hand-maintained — as
 
 ```mermaid
 erDiagram
-    users ||--o| user_profile : "1:1"
     users ||--o{ user_conditions : has
     users ||--o{ user_goals : has
     users ||--o{ user_images : owns
@@ -70,14 +69,12 @@ erDiagram
         string display_name
         bool is_active
         bigint created_at
-    }
-    user_profile {
-        int user_id FK
-        text fitness_goals
-        text training_habit
+        text training_habit "fitness profile"
         text cardio_status
         float target_body_fat_pct
         int target_max_hr
+        text notes
+        bigint profile_updated_at
     }
     user_conditions {
         int id PK
@@ -227,7 +224,8 @@ erDiagram
 
 Notes:
 - All `*_at` columns are unix-epoch seconds (`BIGINT`) so they survive past 2038.
-- `users`, `exercises`, `muscle_groups`, and `exercise_aliases` are seeded automatically on app startup; everything else is filled by the LINE bot at runtime.
+- `exercises`, `muscle_groups`, and `exercise_aliases` are seeded automatically on app startup; everything else is filled by the LINE bot at runtime.
+- Fitness profile fields (`training_habit`, `cardio_status`, target metrics) live on `users` directly. Concrete, deadlined goals live in `user_goals` — the two are deliberately separate.
 
 ## Storage Backends
 

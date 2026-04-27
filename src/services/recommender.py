@@ -32,10 +32,10 @@ async def build_recommendation_context(
             parts.append(f"  [{c['category']}] {c['description']}")
 
     profile_data = await profile.get_profile_summary(db, user_id)
-    if profile_data.get("fitness_goals"):
-        parts.append(f"Goals: {profile_data['fitness_goals']}")
     if profile_data.get("training_habit"):
         parts.append(f"Habit: {profile_data['training_habit']}")
+    if profile_data.get("cardio_status"):
+        parts.append(f"Cardio: {profile_data['cardio_status']}")
 
     return "\n".join(parts)
 

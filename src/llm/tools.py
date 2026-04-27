@@ -186,13 +186,13 @@ TOOLS = [
         "function": {
             "name": "update_user_profile",
             "description": (
-                "Update user's fitness profile (goals, habits, etc). "
-                "Call when user mentions a new goal or routine change."
+                "Update soft fitness-profile context (training cadence, cardio "
+                "status, body-fat / heart-rate targets). For concrete, deadlined "
+                "goals call manage_goal instead."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "fitness_goals": {"type": "string"},
                     "training_habit": {"type": "string"},
                     "cardio_status": {"type": "string"},
                     "target_body_fat_pct": {"type": "number"},
