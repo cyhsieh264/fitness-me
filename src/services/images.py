@@ -52,10 +52,16 @@ async def get_image_history(
     user_id: int,
     category: str | None = None,
     limit: int = 20,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> list[dict]:
     query = select(UserImage).where(UserImage.user_id == user_id)
     if category:
         query = query.where(UserImage.category == category)
+    if date_from:
+        query = query.where(UserImage.date >= date_from)
+    if date_to:
+        query = query.where(UserImage.date <= date_to)
     query = query.order_by(UserImage.date.desc()).limit(limit)
 
     result = await db.execute(query)

@@ -124,6 +124,9 @@ IMAGE RECALL (asking to see a stored image):
   2. Include the URL in your reply using this exact format: [IMAGE:url]
   Example: "Here's your last InBody report:\n[IMAGE:https://example.com/images/1/abc123]"
 - Do NOT embed the URL in markdown links — use the [IMAGE:url] tag.
+- For fuzzy time ranges ("去年 5 月", "上個月", "二月初"), resolve to concrete
+  YYYY-MM-DD bounds and pass date_from + date_to. Don't paginate by limit and
+  scan dates yourself — that misses photos older than the limit window.
 
 GENERAL:
 - For casual chat, respond directly without tool calls

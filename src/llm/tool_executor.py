@@ -226,8 +226,15 @@ async def _query_meal_history(db: AsyncSession, user_id: int, args: dict) -> dic
 
 
 async def _query_user_images(db: AsyncSession, user_id: int, args: dict) -> dict:
+    date_from = date.fromisoformat(args["date_from"]) if args.get("date_from") else None
+    date_to = date.fromisoformat(args["date_to"]) if args.get("date_to") else None
     history = await images.get_image_history(
-        db, user_id, category=args.get("category"), limit=args.get("limit", 10),
+        db,
+        user_id,
+        category=args.get("category"),
+        limit=args.get("limit", 10),
+        date_from=date_from,
+        date_to=date_to,
     )
     if args.get("include_urls"):
         for img in history:

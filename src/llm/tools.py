@@ -512,8 +512,19 @@ TOOLS = [
                 "properties": {
                     "category": {
                         "type": "string",
-                        "enum": ["inbody", "progress", "meal", "other"],
+                        "enum": ["inbody", "progress", "meal", "training_sheet", "other"],
                         "description": "Filter by category (omit for all)",
+                    },
+                    "date_from": {
+                        "type": "string",
+                        "description": (
+                            "Inclusive start YYYY-MM-DD. Resolve fuzzy ranges first "
+                            "(e.g. '去年 5 月' -> '2025-05-01')."
+                        ),
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": "Inclusive end YYYY-MM-DD",
                     },
                     "limit": {
                         "type": "integer",
