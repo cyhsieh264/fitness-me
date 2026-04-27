@@ -315,8 +315,9 @@ async def handle_image_message(event: MessageEvent) -> None:
                 reply = await _process_with_llm(db, user.id, inbody_text)
             else:
                 image_text = (
-                    f"[User sent a {category} photo: {description}]\n"
-                    f"Image saved. Respond to acknowledge the photo."
+                    f"[User just sent a {category} photo: {description}]\n"
+                    f"Follow IMAGE CONTEXT in your instructions: combine this with "
+                    f"any introducer text in the recent chat history before replying."
                 )
                 reply = await _process_with_llm(db, user.id, image_text)
 
