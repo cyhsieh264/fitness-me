@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import time
+from datetime import date
 
 from linebot.v3.messaging import (
     AsyncApiClient,
@@ -281,6 +282,15 @@ async def handle_image_message(event: MessageEvent) -> None:
     category = parsed.get("category", "other")
     description = parsed.get("description")
 
+    # Prefer the date the vision model OCR'd off the image (e.g. InBody test
+    # date) over the upload date. Falls back to today() inside save_image.
+    parsed_date: date | None = None
+    if parsed.get("date"):
+        try:
+            parsed_date = date.fromisoformat(parsed["date"])
+        except (TypeError, ValueError):
+            logger.warning("Vision returned unparseable date: %r", parsed.get("date"))
+
     # Persist image to storage backend + DB record
     async with async_session() as db:
         async with db.begin():
@@ -293,6 +303,7 @@ async def handle_image_message(event: MessageEvent) -> None:
                 message_id=message_id,
                 image_bytes=raw_bytes,
                 description=description,
+                image_date=parsed_date,
             )
 
             if category == "inbody":

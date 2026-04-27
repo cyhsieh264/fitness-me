@@ -29,6 +29,10 @@ CARDIO & BODY COMPOSITION:
 - When user reports body fat %, weight, or muscle mass, call log_body_composition
 - Use query_cardio_progress for cardio trend analysis (includes summary stats)
 - Use query_body_composition for body comp trends (includes goal comparison from profile)
+- log_body_composition.date MUST be the actual measurement date — resolve "yesterday",
+  "上週二", etc. into a YYYY-MM-DD. For an InBody image, use the test date printed on
+  the report (passed to you in the parsed payload), not the upload date. Omit `date`
+  only when the user clearly means today or gives no time hint at all.
 
 INBODY REPORTS:
 - When receiving parsed InBody data (from image), call log_body_composition with ALL fields:
