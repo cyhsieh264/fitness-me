@@ -38,6 +38,44 @@ Parses `specs/spec-001/raw-fitness-record` using LLM. Seeds exercise DB first if
 
 Authoritative source: `src/db/models.py`. This diagram is hand-maintained — ask Claude to redraw it after schema changes.
 
+### Conceptual groups
+
+18 tables, 7 groups. Each group has a single responsibility — splits within a group are driven by either nested cardinality or different retention rules.
+
+**Identity** (1)
+- `users` — LINE identity plus soft fitness-profile fields (cadence, cardio status, target body fat / max HR).
+
+**State & goals about the user** (3)
+- `user_conditions` — body issues / cues the LLM extracts from training logs (posture, weakness, injury). Can be `resolved`.
+- `user_goals` — concrete deadlined goals (`body fat <20% by 2026-06-01`).
+- `user_images` — uploaded photos (InBody, progress shots); the bytes live in the Storage backend, this row is the index.
+
+**Training records** (4, nested)
+- `training_sessions` — one workout (date, self/coach).
+  - `session_exercises` — exercises done that session.
+    - `exercise_sets` — set rows (weight × reps × num_sets). One exercise can have several rows when weight progresses (e.g. `空槓*10 / 6kg*10 / 8kg*8*3`).
+  - `cardio_records` — cardio entries; structurally too different from strength sets to share a table.
+
+**PR cache** (1)
+- `personal_records` — best-ever weight per (user, exercise). Could be derived from `exercise_sets`, but cached so we don't recompute (and re-normalise per_side / counterweight) on every reply.
+
+**Body composition** (2)
+- `body_compositions` — one measurement (body fat, weight, muscle mass, BMR, score).
+- `body_segments` — the 5 InBody body-part rows hanging off a measurement; split out so a measurement isn't 20 columns wide.
+
+**Interaction logs** (3, different retention)
+- `raw_records` — permanent audit log of messages that triggered a DB write (90 days).
+- `chat_messages` — short-term LLM context (7 days).
+- `daily_interactions` — daily push state machine: sent → user replied → bot suggested (90 days).
+
+**Exercise dictionary** (4, all seed data)
+- `exercises` — canonical movement (Barbell Back Squat, RDL, ...).
+- `exercise_aliases` — user shorthand → canonical (`深蹲` / `rdl` / `羅馬尼亞硬舉`).
+- `muscle_groups` — muscle taxonomy.
+- `exercise_muscles` — many-to-many between exercises and muscle groups (primary / secondary).
+
+The remaining sections of this page (diagram + column tables) zoom into the relationships and fields.
+
 ```mermaid
 erDiagram
     users ||--o{ user_conditions : has
