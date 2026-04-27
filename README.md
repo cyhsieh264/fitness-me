@@ -108,7 +108,7 @@ Authoritative source: `src/db/models.py`. This diagram is hand-maintained — as
 **State & goals about the user** (3)
 - `user_conditions` — body issues / cues the LLM extracts from training logs (posture, weakness, injury). Can be `resolved`.
 - `user_goals` — concrete deadlined goals (`body fat <20% by 2026-06-01`).
-- `user_images` — uploaded photos (InBody, progress shots); the bytes live in the Storage backend, this row is the index. `date` is the actual measurement / capture day (vision model OCRs it off InBody printouts), **not** the upload day.
+- `user_images` — uploaded photos (InBody reports, meal photos, training sheets, progress shots, other); the bytes live in the Storage backend, this row is the index. `date` is the actual measurement / capture day (vision model OCRs it off InBody printouts and training sheets), **not** the upload day.
 
 **Training records** (4, nested)
 - `training_sessions` — one workout (date, self/coach).
@@ -202,7 +202,7 @@ erDiagram
     user_images {
         int id PK
         int user_id FK
-        string category "inbody|progress|other"
+        string category "inbody|meal|training_sheet|progress|other"
         string storage_key "Storage backend key"
         date date
         text description
