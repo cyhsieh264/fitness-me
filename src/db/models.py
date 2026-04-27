@@ -1,6 +1,7 @@
 from datetime import date
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     Float,
@@ -25,7 +26,7 @@ class User(Base):
     line_user_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     profile: Mapped["UserProfile | None"] = relationship(back_populates="user", uselist=False)
     conditions: Mapped[list["UserCondition"]] = relationship(back_populates="user")
@@ -50,7 +51,7 @@ class UserProfile(Base):
     target_body_fat_pct: Mapped[float | None] = mapped_column(Float)
     target_max_hr: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
-    updated_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="profile")
 
@@ -66,8 +67,8 @@ class UserCondition(Base):
     exercise_id: Mapped[int | None] = mapped_column(ForeignKey("exercises.id"))
     source_session_id: Mapped[int | None] = mapped_column(ForeignKey("training_sessions.id"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
-    resolved_at: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    resolved_at: Mapped[int | None] = mapped_column(BigInteger)
 
     user: Mapped["User"] = relationship(back_populates="conditions")
     exercise: Mapped["Exercise | None"] = relationship()
@@ -83,7 +84,7 @@ class RawRecord(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     record_type: Mapped[str] = mapped_column(String, nullable=False)
     session_id: Mapped[int | None] = mapped_column(ForeignKey("training_sessions.id"))
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="raw_records")
     session: Mapped["TrainingSession | None"] = relationship()
@@ -143,7 +144,7 @@ class TrainingSession(Base):
     date: Mapped[date] = mapped_column(Date, nullable=False)
     session_type: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
-    recorded_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    recorded_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="training_sessions")
     exercises: Mapped[list["SessionExercise"]] = relationship(
@@ -268,10 +269,10 @@ class UserGoal(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     target_value: Mapped[float | None] = mapped_column(Float)
     target_unit: Mapped[str | None] = mapped_column(String)
-    deadline: Mapped[int | None] = mapped_column(Integer)
+    deadline: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String, default="active")
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
-    achieved_at: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    achieved_at: Mapped[int | None] = mapped_column(BigInteger)
 
     user: Mapped["User"] = relationship(back_populates="goals")
 
@@ -283,11 +284,11 @@ class DailyInteraction(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
-    push_sent_at: Mapped[int | None] = mapped_column(Integer)
+    push_sent_at: Mapped[int | None] = mapped_column(BigInteger)
     user_plan: Mapped[str | None] = mapped_column(String)
     user_response: Mapped[str | None] = mapped_column(Text)
     bot_suggestion: Mapped[str | None] = mapped_column(Text)
-    responded_at: Mapped[int | None] = mapped_column(Integer)
+    responded_at: Mapped[int | None] = mapped_column(BigInteger)
 
     user: Mapped["User"] = relationship(back_populates="daily_interactions")
 
@@ -300,7 +301,7 @@ class ChatMessage(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     role: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="chat_messages")
 
@@ -311,9 +312,9 @@ class UserImage(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
-    image_path: Mapped[str] = mapped_column(String, nullable=False)
+    storage_key: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     date: Mapped[date] = mapped_column(Date, nullable=False)
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="images")

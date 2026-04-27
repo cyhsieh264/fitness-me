@@ -26,7 +26,7 @@ from src.llm.tools import TOOLS
 from src.llm.vision import classify_and_parse_image
 from src.services.chat_history import get_recent_messages, save_message
 from src.services.goals import get_active_goals
-from src.services.images import save_image_file, save_image_record
+from src.services.images import save_image
 from src.services.profile import get_profile_summary
 from src.services.recommender import get_pending_daily_interaction, save_bot_suggestion
 from src.services.user import get_or_create_user
@@ -281,14 +281,19 @@ async def handle_image_message(event: MessageEvent) -> None:
     category = parsed.get("category", "other")
     description = parsed.get("description")
 
-    # Save image file to local filesystem
-    image_path = save_image_file(line_user_id, category, message_id, raw_bytes)
-
-    # Save image record to DB + handle by category
+    # Persist image to storage backend + DB record
     async with async_session() as db:
         async with db.begin():
             user = await get_or_create_user(db, line_user_id)
-            await save_image_record(db, user.id, category, image_path, description)
+            await save_image(
+                db,
+                user_id=user.id,
+                line_user_id=line_user_id,
+                category=category,
+                message_id=message_id,
+                image_bytes=raw_bytes,
+                description=description,
+            )
 
             if category == "inbody":
                 inbody_text = (

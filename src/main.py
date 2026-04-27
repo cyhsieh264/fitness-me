@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -12,9 +11,10 @@ from src.config import settings
 from src.db.database import engine
 from src.db.models import Base
 from src.line.handler import handle_image_message, handle_text_message
-from src.services.images import verify_image_token
 from src.services.import_records import run_import
 from src.services.scheduler import check_and_send_missed_push, start_scheduler, stop_scheduler
+from src.storage import get_storage
+from src.storage.local import LocalStorage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,11 +42,18 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/images/{image_id}/{token}")
-async def serve_image(image_id: int, token: str) -> FileResponse:
-    """Serve user image with HMAC token verification."""
-    path = verify_image_token(image_id, token)
-    if path is None or not Path(path).exists():
+@app.get("/images/{key_b64}/{token}")
+async def serve_image(key_b64: str, token: str) -> FileResponse:
+    """Serve a locally-stored image after verifying the HMAC token.
+
+    Only meaningful when STORAGE_PROVIDER=local; remote backends mint their
+    own signed URLs and bypass this route entirely.
+    """
+    storage = get_storage()
+    if not isinstance(storage, LocalStorage):
+        raise HTTPException(status_code=404, detail="Not found")
+    path = storage.verify_and_path(key_b64, token)
+    if path is None:
         raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(path, media_type="image/jpeg")
 
@@ -55,31 +62,6 @@ def _verify_admin(request: Request) -> None:
     token = request.headers.get("X-Admin-Token", "")
     if not settings.admin_token or token != settings.admin_token:
         raise HTTPException(status_code=403, detail="Forbidden")
-
-
-@app.get("/admin/download-db")
-async def download_db(request: Request) -> FileResponse:
-    """Download a safe copy of the SQLite database."""
-    _verify_admin(request)
-
-    import sqlite3
-    import tempfile
-
-    db_path = settings.database_url.split("///", 1)[1]
-    if not Path(db_path).exists():
-        raise HTTPException(status_code=404, detail="Database not found")
-
-    # Use sqlite3 backup API for a consistent snapshot
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    src_conn = sqlite3.connect(db_path)
-    dst_conn = sqlite3.connect(tmp.name)
-    try:
-        src_conn.backup(dst_conn)
-    finally:
-        dst_conn.close()
-        src_conn.close()
-
-    return FileResponse(tmp.name, filename="fitness.db", media_type="application/octet-stream")
 
 
 @app.post("/admin/import-history")

@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     base_url: str = ""
     admin_token: str = ""
 
+    # Storage
+    storage_provider: str = "local"
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+    supabase_bucket: str = "fitness-images"
+
     @property
     def allowed_user_id_list(self) -> list[str]:
         if not self.allowed_user_ids:
