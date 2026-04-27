@@ -83,4 +83,4 @@ async def seed_exercises(db: AsyncSession) -> dict[str, Exercise]:
 
 @pytest.fixture
 def today() -> date:
-    return date(2026, 3, 12)
+    return date.today()

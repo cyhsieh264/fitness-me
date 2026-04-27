@@ -1,6 +1,6 @@
 """Tests for body composition tracking and goal comparison."""
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,9 +33,13 @@ async def test_body_comp_history(db: AsyncSession, user: User):
     assert history[0]["date"] == "2026-03-01"
 
 
-async def test_body_comp_summary_with_change(db: AsyncSession, user: User):
-    await log_body_composition(db, user.id, date(2026, 1, 15), body_fat_pct=25.0, weight_kg=60.0)
-    await log_body_composition(db, user.id, date(2026, 3, 10), body_fat_pct=22.5, weight_kg=58.0)
+async def test_body_comp_summary_with_change(db: AsyncSession, user: User, today: date):
+    await log_body_composition(
+        db, user.id, today - timedelta(days=80), body_fat_pct=25.0, weight_kg=60.0
+    )
+    await log_body_composition(
+        db, user.id, today - timedelta(days=10), body_fat_pct=22.5, weight_kg=58.0
+    )
     await db.flush()
 
     summary = await get_body_composition_summary(db, user.id, days=90)

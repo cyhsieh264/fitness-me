@@ -1,6 +1,6 @@
 """Tests for cardio recording and progress summary."""
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,17 +45,17 @@ async def test_cardio_filter_by_type(db: AsyncSession, user: User, today: date):
     assert history[0]["type"] == "treadmill"
 
 
-async def test_cardio_summary(db: AsyncSession, user: User):
+async def test_cardio_summary(db: AsyncSession, user: User, today: date):
     await log_cardio(
-        db, user.id, date(2026, 3, 10), "treadmill",
+        db, user.id, today - timedelta(days=2), "treadmill",
         duration_min=30, max_heart_rate=150,
     )
     await log_cardio(
-        db, user.id, date(2026, 3, 12), "treadmill",
+        db, user.id, today, "treadmill",
         duration_min=35, max_heart_rate=160,
     )
     await log_cardio(
-        db, user.id, date(2026, 3, 12), "spinning",
+        db, user.id, today, "spinning",
         duration_min=45, max_heart_rate=170,
     )
     await db.flush()

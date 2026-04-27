@@ -1,6 +1,6 @@
 """Tests for workout recording, PR detection, training detail, and exercise progression."""
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -199,8 +199,10 @@ async def test_assisted_pr_lower_is_better(
     assert results[0]["pr"]["new_best"] == "15kg counterweight"
 
 
-async def test_get_training_history(db: AsyncSession, user: User, seed_exercises: dict):
-    d = date(2026, 3, 12)
+async def test_get_training_history(
+    db: AsyncSession, user: User, seed_exercises: dict, today: date
+):
+    d = today
     s, _ = await get_or_create_session(db, user.id, d, "coach")
     await record_exercises(
         db,
@@ -250,9 +252,11 @@ async def test_get_training_detail(db: AsyncSession, user: User, seed_exercises:
     assert "40" in detail[0]["exercises"][0]["sets"][0]
 
 
-async def test_get_exercise_progression(db: AsyncSession, user: User, seed_exercises: dict):
+async def test_get_exercise_progression(
+    db: AsyncSession, user: User, seed_exercises: dict, today: date
+):
     for i, weight in enumerate([40, 42.5, 45]):
-        d = date(2026, 3, 1 + i * 3)
+        d = today - timedelta(days=6 - i * 3)
         s, _ = await get_or_create_session(db, user.id, d, "self_training")
         await record_exercises(
             db,
