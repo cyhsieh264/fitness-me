@@ -48,7 +48,7 @@ Authoritative source: `src/db/models.py`. This diagram is hand-maintained — as
 **State & goals about the user** (3)
 - `user_conditions` — body issues / cues the LLM extracts from training logs (posture, weakness, injury). Can be `resolved`.
 - `user_goals` — concrete deadlined goals (`body fat <20% by 2026-06-01`).
-- `user_images` — uploaded photos (InBody, progress shots); the bytes live in the Storage backend, this row is the index.
+- `user_images` — uploaded photos (InBody, progress shots); the bytes live in the Storage backend, this row is the index. `date` is the actual measurement / capture day (vision model OCRs it off InBody printouts), **not** the upload day.
 
 **Training records** (4, nested)
 - `training_sessions` — one workout (date, self/coach).
@@ -60,7 +60,7 @@ Authoritative source: `src/db/models.py`. This diagram is hand-maintained — as
 - `personal_records` — best-ever weight per (user, exercise). Could be derived from `exercise_sets`, but cached so we don't recompute (and re-normalise per_side / counterweight) on every reply.
 
 **Body composition** (2)
-- `body_compositions` — one measurement (body fat, weight, muscle mass, BMR, score).
+- `body_compositions` — one measurement (body fat, weight, muscle mass, BMR, score). Aligns to `user_images` for the same InBody report **only via shared `(user_id, date)`** — no FK. Both rows carry the actual measurement date, so the join works even when the photo is uploaded days later.
 - `body_segments` — the 5 InBody body-part rows hanging off a measurement; split out so a measurement isn't 20 columns wide.
 
 **Interaction logs** (3, different retention)
@@ -264,6 +264,7 @@ Notes:
 - All `*_at` columns are unix-epoch seconds (`BIGINT`) so they survive past 2038.
 - `exercises`, `muscle_groups`, and `exercise_aliases` are seeded automatically on app startup; everything else is filled by the LINE bot at runtime.
 - Fitness profile fields (`training_habit`, `cardio_status`, target metrics) live on `users` directly. Concrete, deadlined goals live in `user_goals` — the two are deliberately separate.
+- All `date` columns mean the **actual event day** (training day, measurement day, capture day), never the upload / processing day. The LLM resolves verbal hints like "yesterday" / "上週二" before writing.
 
 ## Storage Backends
 
@@ -272,7 +273,17 @@ Notes:
 - `local`    — writes to `data/images/`. Signed URLs route back through `/images/{key}/{token}` (HMAC).
 - `supabase` — uploads to a Supabase Storage bucket. Signed URLs are minted by Supabase.
 
-To swap, change `STORAGE_PROVIDER` and the Supabase env vars; no code changes required.
+To swap, change `STORAGE_PROVIDER` and the Supabase env vars; no code changes required. Implementations live in `src/storage/{base,local,supabase}.py` behind a three-method `Storage` Protocol — adding S3 / R2 / GCS later means a fourth file, no churn elsewhere.
+
+### Image flow
+
+The Storage interface is touched from exactly three places:
+
+1. **Upload** — `src/line/handler.py::handle_image_message` calls `storage.save(key, bytes)` after the vision model classifies the photo. The DB row in `user_images` only stores the key; bytes never live in Postgres.
+2. **Mint URL** — when the LLM calls `query_user_images(include_urls=True)`, `src/services/images.py::get_image_url` calls `storage.signed_url(key)`. LocalStorage hands back a server-relative URL (HMAC-signed); SupabaseStorage hands back a Supabase-signed URL.
+3. **Serve bytes** — only relevant for LocalStorage: `GET /images/{key_b64}/{token}` in `src/main.py` verifies the HMAC and returns the file. SupabaseStorage URLs hit Supabase's CDN directly and never touch this server.
+
+Image keys are namespaced as `{line_user_id}/{category}/{message_id}.jpg` so a backend swap can rsync / migrate by prefix.
 
 ## Admin API
 
