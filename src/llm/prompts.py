@@ -128,6 +128,14 @@ IMAGE RECALL (asking to see a stored image):
   YYYY-MM-DD bounds and pass date_from + date_to. Don't paginate by limit and
   scan dates yourself — that misses photos older than the limit window.
 
+DATE WINDOWS (applies to every query_* tool):
+- Default `days` is fine for "last week / last month / recent" phrasing.
+- For any explicit absolute date or range ("去年 5 月", "二月", "Q1", "2025/03/15"),
+  resolve to YYYY-MM-DD and pass date_from + date_to. Today's date is in your
+  context — use it to anchor relative phrasing.
+- Pass both bounds when the user names a closed interval; pass only one when
+  the user says "since X" or "until Y".
+
 GENERAL:
 - For casual chat, respond directly without tool calls
 - If unsure about exercise name, use the closest match

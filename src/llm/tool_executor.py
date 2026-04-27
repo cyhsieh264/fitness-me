@@ -22,6 +22,13 @@ from src.utils.time import today
 logger = logging.getLogger(__name__)
 
 
+def _parse_window(args: dict) -> tuple[date | None, date | None]:
+    """Pull date_from / date_to YYYY-MM-DD from tool args, else (None, None)."""
+    df = date.fromisoformat(args["date_from"]) if args.get("date_from") else None
+    dt = date.fromisoformat(args["date_to"]) if args.get("date_to") else None
+    return df, dt
+
+
 async def execute_tool(
     db: AsyncSession,
     user_id: int,
@@ -104,7 +111,8 @@ async def _query_personal_records(db: AsyncSession, user_id: int, args: dict) ->
 
 async def _query_training_history(db: AsyncSession, user_id: int, args: dict) -> dict:
     days = args.get("days", 7)
-    history = await workout.get_training_history(db, user_id, days)
+    df, dt = _parse_window(args)
+    history = await workout.get_training_history(db, user_id, days, date_from=df, date_to=dt)
     return {"sessions": history}
 
 
@@ -119,7 +127,10 @@ async def _query_training_detail(db: AsyncSession, user_id: int, args: dict) -> 
 
 async def _query_exercise_progression(db: AsyncSession, user_id: int, args: dict) -> dict:
     days = args.get("days", 90)
-    return await workout.get_exercise_progression(db, user_id, args["exercise_name"], days)
+    df, dt = _parse_window(args)
+    return await workout.get_exercise_progression(
+        db, user_id, args["exercise_name"], days, date_from=df, date_to=dt
+    )
 
 
 async def _query_conditions(db: AsyncSession, user_id: int, args: dict) -> dict:
@@ -182,18 +193,28 @@ async def _log_body_composition(db: AsyncSession, user_id: int, args: dict) -> d
 
 async def _query_body_composition(db: AsyncSession, user_id: int, args: dict) -> dict:
     days = args.get("days", 90)
-    summary = await body_comp.get_body_composition_summary(db, user_id, days)
+    df, dt = _parse_window(args)
+    summary = await body_comp.get_body_composition_summary(
+        db, user_id, days, date_from=df, date_to=dt
+    )
     if args.get("latest_only"):
         return {"summary": summary}
-    history = await body_comp.get_body_composition_history(db, user_id, days)
+    history = await body_comp.get_body_composition_history(
+        db, user_id, days, date_from=df, date_to=dt
+    )
     return {"summary": summary, "records": history}
 
 
 async def _query_cardio_progress(db: AsyncSession, user_id: int, args: dict) -> dict:
     days = args.get("days", 30)
     cardio_type = args.get("cardio_type")
-    summary = await cardio.get_cardio_summary(db, user_id, days, cardio_type)
-    history = await cardio.get_cardio_history(db, user_id, days, cardio_type)
+    df, dt = _parse_window(args)
+    summary = await cardio.get_cardio_summary(
+        db, user_id, days, cardio_type, date_from=df, date_to=dt
+    )
+    history = await cardio.get_cardio_history(
+        db, user_id, days, cardio_type, date_from=df, date_to=dt
+    )
     return {"summary": summary, "records": history}
 
 
@@ -220,21 +241,23 @@ async def _log_meal(db: AsyncSession, user_id: int, args: dict) -> dict:
 async def _query_meal_history(db: AsyncSession, user_id: int, args: dict) -> dict:
     days = args.get("days", 7)
     meal_type = args.get("meal_type")
-    history = await meal_log.get_meal_history(db, user_id, days, meal_type)
-    totals = await meal_log.get_daily_totals(db, user_id, days)
+    df, dt = _parse_window(args)
+    history = await meal_log.get_meal_history(
+        db, user_id, days, meal_type, date_from=df, date_to=dt
+    )
+    totals = await meal_log.get_daily_totals(db, user_id, days, date_from=df, date_to=dt)
     return {"meals": history, "daily_totals": totals}
 
 
 async def _query_user_images(db: AsyncSession, user_id: int, args: dict) -> dict:
-    date_from = date.fromisoformat(args["date_from"]) if args.get("date_from") else None
-    date_to = date.fromisoformat(args["date_to"]) if args.get("date_to") else None
+    df, dt = _parse_window(args)
     history = await images.get_image_history(
         db,
         user_id,
         category=args.get("category"),
         limit=args.get("limit", 10),
-        date_from=date_from,
-        date_to=date_to,
+        date_from=df,
+        date_to=dt,
     )
     if args.get("include_urls"):
         for img in history:

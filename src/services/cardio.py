@@ -1,11 +1,11 @@
-from datetime import date, timedelta
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import CardioRecord, TrainingSession
 from src.services.workout import get_or_create_session
-from src.utils.time import today
+from src.utils.time import window_dates
 
 
 async def log_cardio(
@@ -56,18 +56,22 @@ async def get_cardio_history(
     user_id: int,
     days: int = 30,
     cardio_type: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> list[dict[str, object]]:
-    cutoff = today() - timedelta(days=days)
+    start, end = window_dates(days, date_from, date_to)
 
     query = (
         select(CardioRecord, TrainingSession.date)
         .join(TrainingSession)
         .where(
             TrainingSession.user_id == user_id,
-            TrainingSession.date >= cutoff,
+            TrainingSession.date >= start,
         )
         .order_by(TrainingSession.date.desc())
     )
+    if end:
+        query = query.where(TrainingSession.date <= end)
     if cardio_type:
         query = query.where(CardioRecord.cardio_type == cardio_type)
 
@@ -96,9 +100,11 @@ async def get_cardio_summary(
     user_id: int,
     days: int = 30,
     cardio_type: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> dict[str, object]:
     """Aggregate stats for LLM trend analysis."""
-    records = await get_cardio_history(db, user_id, days, cardio_type)
+    records = await get_cardio_history(db, user_id, days, cardio_type, date_from, date_to)
     if not records:
         return {"total_sessions": 0}
 

@@ -6,13 +6,13 @@ was attached, but works equally well from text-only logging ("早餐三明治 + 
 
 import json
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import MealLog
-from src.utils.time import timestamp
+from src.utils.time import timestamp, window_dates
 
 
 async def log_meal(
@@ -51,9 +51,13 @@ async def get_meal_history(
     user_id: int,
     days: int = 7,
     meal_type: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> list[dict]:
-    cutoff = date.today() - timedelta(days=days)
-    query = select(MealLog).where(MealLog.user_id == user_id, MealLog.date >= cutoff)
+    start, end = window_dates(days, date_from, date_to)
+    query = select(MealLog).where(MealLog.user_id == user_id, MealLog.date >= start)
+    if end:
+        query = query.where(MealLog.date <= end)
     if meal_type:
         query = query.where(MealLog.meal_type == meal_type)
     query = query.order_by(MealLog.date.desc(), MealLog.created_at.desc())
@@ -66,12 +70,15 @@ async def get_daily_totals(
     db: AsyncSession,
     user_id: int,
     days: int = 7,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> dict[str, dict[str, float]]:
     """Aggregate calories + macros per date over the window."""
-    cutoff = date.today() - timedelta(days=days)
-    result = await db.execute(
-        select(MealLog).where(MealLog.user_id == user_id, MealLog.date >= cutoff)
-    )
+    start, end = window_dates(days, date_from, date_to)
+    query = select(MealLog).where(MealLog.user_id == user_id, MealLog.date >= start)
+    if end:
+        query = query.where(MealLog.date <= end)
+    result = await db.execute(query)
 
     totals: dict[str, dict[str, float]] = defaultdict(
         lambda: {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0}

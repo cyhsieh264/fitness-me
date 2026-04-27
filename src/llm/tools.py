@@ -233,7 +233,15 @@ TOOLS = [
                 "properties": {
                     "days": {
                         "type": "integer",
-                        "description": "Days to look back (default 7)",
+                        "description": "Days to look back (default 7). Ignored if date_from/date_to set.",
+                    },
+                    "date_from": {
+                        "type": "string",
+                        "description": "Inclusive start YYYY-MM-DD. Resolve fuzzy ranges first.",
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": "Inclusive end YYYY-MM-DD",
                     },
                 },
             },
@@ -279,7 +287,15 @@ TOOLS = [
                     },
                     "days": {
                         "type": "integer",
-                        "description": "Days to look back (default 90)",
+                        "description": "Days to look back (default 90). Ignored if date_from/date_to set.",
+                    },
+                    "date_from": {
+                        "type": "string",
+                        "description": "Inclusive start YYYY-MM-DD",
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": "Inclusive end YYYY-MM-DD",
                     },
                 },
                 "required": ["exercise_name"],
@@ -467,7 +483,15 @@ TOOLS = [
                 "properties": {
                     "days": {
                         "type": "integer",
-                        "description": "Days to look back (default 90)",
+                        "description": "Days to look back (default 90). Ignored if date_from/date_to set.",
+                    },
+                    "date_from": {
+                        "type": "string",
+                        "description": "Inclusive start YYYY-MM-DD",
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": "Inclusive end YYYY-MM-DD",
                     },
                     "latest_only": {
                         "type": "boolean",
@@ -487,7 +511,15 @@ TOOLS = [
                 "properties": {
                     "days": {
                         "type": "integer",
-                        "description": "Days to look back (default 30)",
+                        "description": "Days to look back (default 30). Ignored if date_from/date_to set.",
+                    },
+                    "date_from": {
+                        "type": "string",
+                        "description": "Inclusive start YYYY-MM-DD",
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": "Inclusive end YYYY-MM-DD",
                     },
                     "cardio_type": {
                         "type": "string",
@@ -668,7 +700,15 @@ TOOLS = [
                 "properties": {
                     "days": {
                         "type": "integer",
-                        "description": "Days to look back (default 7)",
+                        "description": "Days to look back (default 7). Ignored if date_from/date_to set.",
+                    },
+                    "date_from": {
+                        "type": "string",
+                        "description": "Inclusive start YYYY-MM-DD",
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": "Inclusive end YYYY-MM-DD",
                     },
                     "meal_type": {
                         "type": "string",

@@ -1,12 +1,12 @@
 import json
-from datetime import date, timedelta
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.db.models import BodyComposition, BodySegment
-from src.utils.time import today
+from src.utils.time import window_dates
 
 
 async def log_body_composition(
@@ -72,18 +72,24 @@ async def get_body_composition_history(
     db: AsyncSession,
     user_id: int,
     days: int = 90,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> list[dict[str, object]]:
-    cutoff = today() - timedelta(days=days)
+    start, end = window_dates(days, date_from, date_to)
 
-    result = await db.execute(
+    query = (
         select(BodyComposition)
         .options(selectinload(BodyComposition.segments))
         .where(
             BodyComposition.user_id == user_id,
-            BodyComposition.date >= cutoff,
+            BodyComposition.date >= start,
         )
         .order_by(BodyComposition.date.desc())
     )
+    if end:
+        query = query.where(BodyComposition.date <= end)
+
+    result = await db.execute(query)
     records = result.scalars().all()
 
     return [_record_to_dict(r) for r in records]
@@ -122,11 +128,13 @@ async def get_body_composition_summary(
     db: AsyncSession,
     user_id: int,
     days: int = 90,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> dict[str, object]:
     """Latest measurement, period change, and goal comparison."""
     from src.services.profile import get_profile_summary
 
-    records = await get_body_composition_history(db, user_id, days)
+    records = await get_body_composition_history(db, user_id, days, date_from, date_to)
     if not records:
         return {"total_measurements": 0}
 

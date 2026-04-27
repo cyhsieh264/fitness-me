@@ -12,7 +12,7 @@ from src.db.models import (
     SessionExercise,
     TrainingSession,
 )
-from src.utils.time import timestamp, today
+from src.utils.time import timestamp, today, window_dates
 
 LB_TO_KG = 0.453592
 
@@ -252,17 +252,22 @@ async def get_training_history(
     db: AsyncSession,
     user_id: int,
     days: int = 7,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> list[dict]:
-    cutoff = today() - timedelta(days=days)
+    start, end = window_dates(days, date_from, date_to)
 
-    result = await db.execute(
+    query = (
         select(TrainingSession)
         .where(
             TrainingSession.user_id == user_id,
-            TrainingSession.date >= cutoff,
+            TrainingSession.date >= start,
         )
         .order_by(TrainingSession.date.desc())
     )
+    if end:
+        query = query.where(TrainingSession.date <= end)
+    result = await db.execute(query)
     sessions = result.scalars().all()
 
     history = []
@@ -379,22 +384,26 @@ async def get_exercise_progression(
     user_id: int,
     exercise_name: str,
     days: int = 90,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> dict:
     """Get weight progression for a specific exercise over time."""
     exercise = await resolve_exercise(db, exercise_name)
     display_name = exercise.name_zh if exercise else exercise_name
 
-    cutoff = today() - timedelta(days=days)
+    start, end = window_dates(days, date_from, date_to)
 
     query = (
         select(SessionExercise)
         .join(TrainingSession)
         .where(
             TrainingSession.user_id == user_id,
-            TrainingSession.date >= cutoff,
+            TrainingSession.date >= start,
         )
         .order_by(TrainingSession.date.asc())
     )
+    if end:
+        query = query.where(TrainingSession.date <= end)
 
     if exercise:
         query = query.where(SessionExercise.exercise_id == exercise.id)

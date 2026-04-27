@@ -54,3 +54,21 @@ def today_start_ts() -> int:
 def days_ago_ts(days: int) -> int:
     """Unix timestamp for N days ago from now."""
     return timestamp() - (days * 86400)
+
+
+def window_dates(
+    days: int,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> tuple[date, date | None]:
+    """Resolve a query window: explicit range wins over days-fallback.
+
+    If either date_from or date_to is set, use them as-is (the other side
+    stays None to mean unbounded). Otherwise fall back to "last `days` days
+    inclusive" with no upper bound.
+    """
+    from datetime import timedelta
+
+    if date_from is not None or date_to is not None:
+        return (date_from or date.min, date_to)
+    return (today() - timedelta(days=days), None)
