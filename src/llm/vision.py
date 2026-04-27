@@ -14,23 +14,24 @@ IMAGE_CLASSIFY_PROMPT = """\
 You are a fitness image analyzer. Classify this image and extract relevant data.
 
 Step 1: Determine the category:
-- "inbody": An InBody or body composition analyzer report/printout
-- "progress": Gym selfie, physique photo, before/after comparison
-- "meal": Food or meal photo
-- "other": Anything else
+- "inbody":         An InBody or body composition analyzer report/printout
+- "training_sheet": A workout written on paper/whiteboard/screen (sets, weights, reps)
+- "meal":           Food or meal photo
+- "progress":       Gym selfie, physique photo, before/after comparison
+- "other":          Anything else
 
-Step 2: Return a JSON object based on the category.
-
-For ALL categories, include:
+Step 2: Return a JSON object. ALWAYS include:
 {
-  "category": "inbody|progress|meal|other",
-  "description": "Brief description in Traditional Chinese (zh-TW)"
+  "category": "<one of the above>",
+  "description": "Concrete 1–2 sentence description in Traditional Chinese (zh-TW)"
 }
 
-For "inbody" ONLY, also include all extractable fields:
+Per-category extras:
+
+# inbody
 {
   "category": "inbody",
-  "description": "InBody report description",
+  "description": "...",
   "date": "YYYY-MM-DD if visible",
   "weight_kg": number,
   "body_fat_pct": number,
@@ -48,22 +49,54 @@ For "inbody" ONLY, also include all extractable fields:
     {"segment": "right_leg", ...}
   ],
   "inbody_data": {
-    "bmi": number,
-    "body_water_kg": number,
-    "protein_kg": number,
-    "mineral_kg": number,
-    "ideal_weight_kg": number,
-    "ideal_body_fat_pct": number,
-    "waist_hip_ratio": number,
+    "bmi": number, "body_water_kg": number, "protein_kg": number,
+    "mineral_kg": number, "ideal_weight_kg": number,
+    "ideal_body_fat_pct": number, "waist_hip_ratio": number,
     ... any other visible data
   }
 }
 
+# meal
+{
+  "category": "meal",
+  "description": "...",
+  "meal_type": "breakfast|lunch|dinner|snack",
+  "food_items": ["義大利麵", "沙拉", "美式咖啡"],
+  "estimated_calories": integer,
+  "estimated_protein_g": number,
+  "estimated_carbs_g": number,
+  "estimated_fat_g": number
+}
+
+# training_sheet
+{
+  "category": "training_sheet",
+  "description": "...",
+  "date": "YYYY-MM-DD if visible",
+  "exercises": [
+    { "name": "深蹲",  "raw_text": "40kg*10*4" },
+    { "name": "RDL",   "raw_text": "35kg*10*3" }
+  ]
+}
+
+# progress
+{
+  "category": "progress",
+  "description": "正面/側面/背面，1–3 個具體觀察（對稱性、線條、姿勢），不要主觀美醜評論。"
+}
+
+# other
+{
+  "category": "other",
+  "description": "1–2 句具體描述，捕捉與健身可能相關的線索。"
+}
+
 IMPORTANT:
 - Return ONLY valid JSON, no markdown or explanation.
-- Use "below", "standard", "above" for grades.
-- For segment grades, map from bar chart levels on the report.
-- Omit fields not visible in the image (except category and description).
+- Omit any field you cannot determine confidently — never invent numbers.
+- For segment grades, map from bar chart levels on the InBody report.
+- meal_type / category / description are required for their categories;
+  numeric estimates may be omitted if the photo is too ambiguous.
 """
 
 

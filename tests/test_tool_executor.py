@@ -115,6 +115,24 @@ async def test_unknown_tool(db: AsyncSession, user: User):
     assert "error" in result
 
 
+async def test_log_meal(db: AsyncSession, user: User):
+    args = {
+        "meal_type": "lunch",
+        "food_items": ["燒肉飯", "味噌湯"],
+        "calories": 850,
+        "protein_g": 35,
+    }
+    result = json.loads(await execute_tool(db, user.id, "log_meal", args))
+
+    assert result["meal_type"] == "lunch"
+    assert result["food_items"] == ["燒肉飯", "味噌湯"]
+    assert result["calories"] == 850
+
+    history = json.loads(await execute_tool(db, user.id, "query_meal_history", {"days": 1}))
+    assert len(history["meals"]) == 1
+    assert history["daily_totals"][result["date"]]["calories"] == 850
+
+
 async def test_update_user_profile(db: AsyncSession, user: User):
     result = json.loads(
         await execute_tool(

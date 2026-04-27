@@ -291,11 +291,12 @@ async def handle_image_message(event: MessageEvent) -> None:
         except (TypeError, ValueError):
             logger.warning("Vision returned unparseable date: %r", parsed.get("date"))
 
-    # Persist image to storage backend + DB record
+    # Persist image to storage backend + DB record. Save first so meal/training
+    # flows can pass image_id to the structured-logging tools.
     async with async_session() as db:
         async with db.begin():
             user = await get_or_create_user(db, line_user_id)
-            await save_image(
+            saved = await save_image(
                 db,
                 user_id=user.id,
                 line_user_id=line_user_id,
@@ -305,21 +306,36 @@ async def handle_image_message(event: MessageEvent) -> None:
                 description=description,
                 image_date=parsed_date,
             )
+            image_id = saved["id"]
+
+            payload = json.dumps(parsed, ensure_ascii=False)
 
             if category == "inbody":
-                inbody_text = (
+                synthetic = (
                     f"[InBody report parsed from image]\n"
-                    f"Please call log_body_composition with this data: "
-                    f"{json.dumps(parsed, ensure_ascii=False)}"
+                    f"Please call log_body_composition with this data: {payload}"
                 )
-                reply = await _process_with_llm(db, user.id, inbody_text)
+            elif category == "meal":
+                synthetic = (
+                    f"[Meal photo parsed, image_id={image_id}]\n"
+                    f"Please call log_meal with this data (include image_id={image_id}): "
+                    f"{payload}"
+                )
+            elif category == "training_sheet":
+                synthetic = (
+                    f"[Training sheet parsed from image]\n"
+                    f"Please call log_strength_training with the exercises array; "
+                    f"each exercise's raw_text follows the same '40kg*10*4' grammar "
+                    f"as a typed log: {payload}"
+                )
             else:
-                image_text = (
+                synthetic = (
                     f"[User just sent a {category} photo: {description}]\n"
                     f"Follow IMAGE CONTEXT in your instructions: combine this with "
                     f"any introducer text in the recent chat history before replying."
                 )
-                reply = await _process_with_llm(db, user.id, image_text)
+
+            reply = await _process_with_llm(db, user.id, synthetic)
 
     await _send_reply(line_user_id, reply_token, reply, start)
 

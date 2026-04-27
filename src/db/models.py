@@ -47,6 +47,7 @@ class User(Base):
     chat_messages: Mapped[list["ChatMessage"]] = relationship(back_populates="user")
     goals: Mapped[list["UserGoal"]] = relationship(back_populates="user")
     images: Mapped[list["UserImage"]] = relationship(back_populates="user")
+    meals: Mapped[list["MealLog"]] = relationship(back_populates="user")
 
 
 class UserCondition(Base):
@@ -311,3 +312,25 @@ class UserImage(Base):
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="images")
+    meal_log: Mapped["MealLog | None"] = relationship(back_populates="image", uselist=False)
+
+
+class MealLog(Base):
+    __tablename__ = "meal_logs"
+    __table_args__ = (Index("ix_meal_logs_user_date", "user_id", "date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    meal_type: Mapped[str] = mapped_column(String, nullable=False)
+    food_items: Mapped[str] = mapped_column(Text, nullable=False)
+    calories: Mapped[int | None] = mapped_column(Integer)
+    protein_g: Mapped[float | None] = mapped_column(Float)
+    carbs_g: Mapped[float | None] = mapped_column(Float)
+    fat_g: Mapped[float | None] = mapped_column(Float)
+    image_id: Mapped[int | None] = mapped_column(ForeignKey("user_images.id"))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="meals")
+    image: Mapped["UserImage | None"] = relationship(back_populates="meal_log")

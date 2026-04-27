@@ -12,6 +12,7 @@ from src.services import (
     condition,
     goals,
     images,
+    meal_log,
     profile,
     recommender,
     workout,
@@ -196,6 +197,34 @@ async def _query_cardio_progress(db: AsyncSession, user_id: int, args: dict) -> 
     return {"summary": summary, "records": history}
 
 
+async def _log_meal(db: AsyncSession, user_id: int, args: dict) -> dict:
+    meal_date = today()
+    if args.get("date"):
+        meal_date = date.fromisoformat(args["date"])
+
+    return await meal_log.log_meal(
+        db,
+        user_id=user_id,
+        meal_date=meal_date,
+        meal_type=args["meal_type"],
+        food_items=args.get("food_items", []),
+        calories=args.get("calories"),
+        protein_g=args.get("protein_g"),
+        carbs_g=args.get("carbs_g"),
+        fat_g=args.get("fat_g"),
+        image_id=args.get("image_id"),
+        notes=args.get("notes"),
+    )
+
+
+async def _query_meal_history(db: AsyncSession, user_id: int, args: dict) -> dict:
+    days = args.get("days", 7)
+    meal_type = args.get("meal_type")
+    history = await meal_log.get_meal_history(db, user_id, days, meal_type)
+    totals = await meal_log.get_daily_totals(db, user_id, days)
+    return {"meals": history, "daily_totals": totals}
+
+
 async def _query_user_images(db: AsyncSession, user_id: int, args: dict) -> dict:
     history = await images.get_image_history(
         db, user_id, category=args.get("category"), limit=args.get("limit", 10),
@@ -262,6 +291,8 @@ _HANDLERS = {
     "query_body_composition": _query_body_composition,
     "query_cardio_progress": _query_cardio_progress,
     "query_user_images": _query_user_images,
+    "log_meal": _log_meal,
+    "query_meal_history": _query_meal_history,
     "manage_goal": _manage_goal,
     "update_daily_plan": _update_daily_plan,
 }

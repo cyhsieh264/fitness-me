@@ -19,6 +19,8 @@ Personal fitness LINE Bot powered by LLM. Tracks workouts, detects PRs, and give
 | **訓練紀錄** | 直接打「深蹲 40kg*10*4」，LLM 解析後寫進 DB 並回覆確認 |
 | **PR 自動偵測** | 重量破紀錄時自動標記、慶祝、推算下次目標（含助力器材的反向邏輯）|
 | **InBody 拍照入庫** | 傳 InBody 報告照片 → 視覺模型 OCR → 自動寫入體脂、骨骼肌、各部位數據 |
+| **飲食紀錄** | 傳便當照（或文字描述）→ 視覺模型估算餐點/熱量/巨量營養素 → 寫入結構化紀錄，可查每日總熱量 |
+| **訓練表入庫** | 拍紙本訓練單 → 視覺模型解析動作/組數/重量 → 走跟手打文字一樣的 `log_strength_training` 流程 |
 | **每日推播** | 早上 8 點推「今天有什麼計畫？」根據回覆給對應建議 |
 | **訓練推薦** | 自主訓練時，LLM 參考近 7 天訓練、身體狀況、目標，避開 48 小時內練過的肌群 |
 | **隨時查詢** | 「我上週練了什麼？」「最大深蹲？」「體脂趨勢？」「給我看上次 InBody」全用聊天問 |
@@ -98,7 +100,7 @@ Authoritative source: `src/db/models.py`. This diagram is hand-maintained — as
 
 ### Conceptual groups
 
-18 tables, 7 groups. Each group has a single responsibility — splits within a group are driven by either nested cardinality or different retention rules.
+19 tables, 7 groups. Each group has a single responsibility — splits within a group are driven by either nested cardinality or different retention rules.
 
 **Identity** (1)
 - `users` — LINE identity plus soft fitness-profile fields (cadence, cardio status, target body fat / max HR).
@@ -117,9 +119,10 @@ Authoritative source: `src/db/models.py`. This diagram is hand-maintained — as
 **PR cache** (1)
 - `personal_records` — best-ever weight per (user, exercise). Could be derived from `exercise_sets`, but cached so we don't recompute (and re-normalise per_side / counterweight) on every reply.
 
-**Body composition** (2)
+**Body & nutrition** (3)
 - `body_compositions` — one measurement (body fat, weight, muscle mass, BMR, score). Aligns to `user_images` for the same InBody report **only via shared `(user_id, date)`** — no FK. Both rows carry the actual measurement date, so the join works even when the photo is uploaded days later.
 - `body_segments` — the 5 InBody body-part rows hanging off a measurement; split out so a measurement isn't 20 columns wide.
+- `meal_logs` — one meal entry (date + meal_type, food list, optional calorie/macro estimates). Has an explicit nullable FK to `user_images` because there can be multiple meals per day, so date alignment alone wouldn't disambiguate. Source of truth — works without a photo.
 
 **Interaction logs** (3, different retention)
 - `raw_records` — permanent audit log of messages that triggered a DB write (90 days).
@@ -158,6 +161,9 @@ erDiagram
     exercises }o--o{ muscle_groups : "exercise_muscles"
 
     body_compositions ||--o{ body_segments : "InBody parts"
+
+    users ||--o{ meal_logs : eats
+    user_images ||--o| meal_logs : "optional photo"
 
     users {
         int id PK
@@ -315,6 +321,19 @@ erDiagram
         string name
         string name_zh
         string category "lower_body|upper_push|upper_pull|core"
+    }
+    meal_logs {
+        int id PK
+        int user_id FK
+        date date
+        string meal_type "breakfast|lunch|dinner|snack"
+        text food_items "JSON array"
+        int calories
+        float protein_g
+        float carbs_g
+        float fat_g
+        int image_id FK "nullable"
+        bigint created_at
     }
 ```
 

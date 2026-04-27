@@ -605,4 +605,67 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "log_meal",
+            "description": (
+                "Record a meal with optional nutrition estimates. Call when user "
+                "describes what they ate (text or photo). Always pass image_id "
+                "if a synthetic [User just sent a meal photo] payload included one."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Eat date YYYY-MM-DD. Omit for today.",
+                    },
+                    "meal_type": {
+                        "type": "string",
+                        "enum": ["breakfast", "lunch", "dinner", "snack"],
+                    },
+                    "food_items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of foods, e.g. ['義大利麵', '沙拉']",
+                    },
+                    "calories": {"type": "integer"},
+                    "protein_g": {"type": "number"},
+                    "carbs_g": {"type": "number"},
+                    "fat_g": {"type": "number"},
+                    "image_id": {
+                        "type": "integer",
+                        "description": "user_images row id when this meal came from a photo",
+                    },
+                    "notes": {"type": "string"},
+                },
+                "required": ["meal_type", "food_items"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_meal_history",
+            "description": (
+                "List recent meals with daily nutrition totals. Call when user asks "
+                "about diet history, calorie/macro intake, or 'what did I eat'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "Days to look back (default 7)",
+                    },
+                    "meal_type": {
+                        "type": "string",
+                        "enum": ["breakfast", "lunch", "dinner", "snack"],
+                        "description": "Filter to one meal type",
+                    },
+                },
+            },
+        },
+    },
 ]
