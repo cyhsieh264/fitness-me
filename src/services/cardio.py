@@ -23,7 +23,10 @@ _MET_TABLE: dict[str, float] = {
     "running_fast": 12.5,     # speed ≥ 12
     "swimming": 6.0,
     "elliptical": 5.0,
-    "hiking": 6.0,
+    "walking_slow": 2.5,      # speed < 4 km/h, leisure stroll
+    "walking_moderate": 3.5,  # 4-5.5 km/h
+    "walking_brisk": 4.3,     # speed ≥ 5.5
+    "hiking": 6.0,            # trail / uneven terrain / some elevation
     "other": 6.0,
 }
 
@@ -51,6 +54,14 @@ def _met_for(cardio_type: str, speed_kmh: float | None) -> float:
         if speed_kmh is not None and speed_kmh >= 12:
             return _MET_TABLE["running_fast"]
         return _MET_TABLE["running_moderate"]
+    if cardio_type == "walking":
+        if speed_kmh is None:
+            return _MET_TABLE["walking_moderate"]
+        if speed_kmh < 4:
+            return _MET_TABLE["walking_slow"]
+        if speed_kmh < 5.5:
+            return _MET_TABLE["walking_moderate"]
+        return _MET_TABLE["walking_brisk"]
     return _MET_TABLE.get(cardio_type, _MET_TABLE["other"])
 
 

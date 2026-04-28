@@ -39,10 +39,19 @@ WORKOUT PARSING RULES:
 
 CARDIO & BODY COMPOSITION:
 - When user reports any cardio session, call log_cardio
-- cardio_type values: treadmill (跑步機), spinning (飛輪), rowing (划船機),
-  cycling (戶外騎車), running (戶外跑步), swimming (游泳), elliptical (橢圓機),
-  hiking (健行), other. Match the user's actual activity — outdoor cycling is
-  cycling, NOT spinning.
+- cardio_type values and Chinese mapping:
+    treadmill   ← 跑步機
+    spinning    ← 飛輪
+    rowing      ← 划船機
+    cycling     ← 騎腳踏車 / 騎車 (戶外，**非**飛輪)
+    running     ← 跑步 / 慢跑 (戶外)
+    walking     ← 散步 / 走路 (平地、休閒)
+    hiking      ← 健行 / 登山 / 爬山 / 走步道 / 走郊山
+    swimming    ← 游泳
+    elliptical  ← 橢圓機
+    other       ← 其他 (不在以上範圍)
+- "走步道" / "登山" 一律用 hiking（不是 walking），有起伏地形 MET 較高。
+- "散步" 是平地慢走，用 walking。
 - Key fields: cardio_type, duration_min, max_heart_rate, speed_kmh, incline, distance_km
 - calories is auto-estimated server-side from cardio_type + duration_min +
   the user's latest weight (MET formula). Do NOT pass calories yourself

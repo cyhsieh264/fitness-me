@@ -119,3 +119,17 @@ async def test_calories_uses_latest_weight(db: AsyncSession, user: User, today: 
     # 7.5 * 90 * 3.5 * 30 / 200 ≈ 354 kcal — clearly above the 65kg baseline
     assert result["calories"] is not None
     assert result["calories"] > 320
+
+
+async def test_walking_vs_hiking_calories(db: AsyncSession, user: User, today: date):
+    # 60 min walking moderate (MET 3.5) at 65kg ≈ 239 kcal
+    walk = await log_cardio(db, user.id, today, "walking", duration_min=60)
+    # 90 min hiking (MET 6.0) at 65kg ≈ 614 kcal
+    hike = await log_cardio(db, user.id, today, "hiking", duration_min=90)
+    await db.flush()
+
+    assert walk["calories_estimated"] is True
+    assert hike["calories_estimated"] is True
+    assert 200 <= walk["calories"] <= 270
+    assert 580 <= hike["calories"] <= 660
+    assert hike["calories"] > walk["calories"]   # hiking burns more per minute
