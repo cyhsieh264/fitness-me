@@ -1,0 +1,53 @@
+# Fitness-Me historical-import template
+#
+# Strict rule: every workout block STARTS with a date on its own line in the
+# format YYYY/MM/DD. Anything between two dates belongs to the earlier date.
+# Blank lines are ignored. Comments are not supported by the parser — strip
+# them before uploading.
+#
+# Submit via:
+#   curl -X POST https://<host>/admin/import-history \
+#     -H "X-API-Key: $ADMIN_API_KEY" \
+#     -F "line_user_id=U..." \
+#     -F "file=@my-records.txt"
+#
+# The LLM interprets the body of each block. The conventions below mirror what
+# the import prompt is taught — sticking to them maximises parse success.
+
+2025/05/12
+槓鈴深蹲 40kg*10*4
+RDL 35kg*10*3
+保加利亞分腿蹲 8kg each*10*3
+平板 30sec*3
+左骨盆較高，下次注意活化右臀
+
+2025/05/14
+臥推 練習槓+5kg each*8*3
+滑輪下拉 35kg*10*3
+單臂啞鈴划船 12kg each*10*3
+WOD Circuit Wod 30:30*5
+  burpee
+  KB swing 12kg
+  box jump
+
+2025/05/16
+深蹲 8-12*3
+槓鈴肩推 25kg*10*3
+引體向上 空*5*3 (counterweight 助力)
+band 列：黑+綠 10*3
+站姿提膝 30sec each side*3
+
+# === conventions cheat-sheet ===
+# 40kg*10*4              -> 40kg, 10 reps, 4 sets (total weight)
+# 8kg each*10*3          -> 8kg per side (per_side weight)
+# 空                     -> bodyweight (no weight value recorded)
+# 練習槓                  -> empty 20kg barbell. "練習槓+5kg each" = 30kg total
+# 黑+綠                  -> band weight, band_info "black+green"
+# 30sec*3                -> timed exercise, 30 seconds, 3 sets
+# 30sec each side*3      -> per-side timed, 3 sets
+# Wod 30:30*N            -> circuit (30s work / 30s rest), N rounds
+# 8-12*3                 -> rep range 8-12, 3 sets
+# 34-38kg                -> takes the higher value (38)
+# (cue text)             -> attached as exercise notes
+# 5上 / 9下              -> bench height setting, IGNORED by the parser
+# Body observations like "左骨盆較高" -> become user_conditions entries

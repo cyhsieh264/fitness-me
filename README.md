@@ -370,6 +370,8 @@ Requires `ADMIN_API_KEY` env var. All requests must include `X-API-Key` header.
 
 The endpoint returns **202 Accepted** immediately and runs the LLM parsing in the background. Records are written under the request-supplied `line_user_id` (the data owner); when the import finishes `ADMIN_LINE_USER_ID` (the operator) receives a LINE push notification with the success/skip counts (or a failure message).
 
+**File format:** see [`docs/import-template.txt`](docs/import-template.txt). The hard rule is that every block starts with a `YYYY/MM/DD` line; the body uses LLM-interpreted notation (`40kg*10*4`, `8kg each`, `空`, `30sec*3`, etc.). Blank lines are tolerated. **The current pipeline is purely additive — re-importing the same file will duplicate every record.** Only run import once per dataset, or pre-clean the affected dates in Postgres.
+
 File upload (recommended):
 
 ```bash
