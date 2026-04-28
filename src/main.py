@@ -10,7 +10,9 @@ from linebot.v3.webhooks import ImageMessageContent, MessageEvent, TextMessageCo
 
 from scripts.seed import run_seed
 from src.config import settings
+from src.db.database import async_session
 from src.line.handler import handle_image_message, handle_text_message, push_text
+from src.services.admin_ops import delete_records_in_range
 from src.services.import_records import run_import
 from src.services.scheduler import check_and_send_missed_push, start_scheduler, stop_scheduler
 from src.storage import get_storage
@@ -75,15 +77,16 @@ async def _run_import_and_notify(
     """
     notify_to = settings.admin_line_user_id
     try:
-        success, total = await run_import(line_user_id, raw_text, cutoff_years)
-        skipped = total - success
+        counts = await run_import(line_user_id, raw_text, cutoff_years)
         lines = [
             "歷史紀錄匯入完成",
             f"使用者：{line_user_id}",
-            f"寫入：{success}/{total} 筆",
+            f"新增：{counts['new']}/{counts['total']} 筆",
         ]
-        if skipped:
-            lines.append(f"（{skipped} 筆 LLM 無法解析跳過）")
+        if counts["already_existed"]:
+            lines.append(f"已存在跳過：{counts['already_existed']} 筆")
+        if counts["llm_failed"]:
+            lines.append(f"無法解析：{counts['llm_failed']} 筆")
         await push_text(notify_to, "\n".join(lines))
     except Exception:
         logger.exception("Background import failed for %s", line_user_id)
@@ -138,6 +141,52 @@ async def import_history(
         "notify_to": settings.admin_line_user_id,
         "message": "Import running in background; admin will receive a LINE notification.",
     }
+
+
+@app.post("/admin/delete-records")
+async def delete_records(
+    request: Request,
+    line_user_id: str = Form(None),
+    start_date: str = Form(None),
+    end_date: str = Form(None),
+) -> dict:
+    """Delete a user's records (training / cardio / body / meal / PR) within
+    a date range.
+
+    Accepts either form-data or JSON. `end_date` must be >= `start_date`;
+    same date is allowed (deletes only that day). Missing user / empty
+    range returns 200 with zero counts — only validation/server errors
+    raise.
+    """
+    _verify_admin_api_key(request)
+
+    if not (line_user_id and start_date and end_date):
+        body = await request.json()
+        line_user_id = line_user_id or body.get("line_user_id")
+        start_date = start_date or body.get("start_date")
+        end_date = end_date or body.get("end_date")
+
+    if not (line_user_id and start_date and end_date):
+        raise HTTPException(
+            status_code=400,
+            detail="line_user_id, start_date, end_date are all required",
+        )
+
+    try:
+        from datetime import date as _date
+        sd = _date.fromisoformat(start_date)
+        ed = _date.fromisoformat(end_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="dates must be YYYY-MM-DD")
+
+    if ed < sd:
+        raise HTTPException(status_code=400, detail="end_date must be >= start_date")
+
+    async with async_session() as db:
+        async with db.begin():
+            counts = await delete_records_in_range(db, line_user_id, sd, ed)
+
+    return {"status": "ok", "deleted": counts}
 
 
 @app.post("/webhook")

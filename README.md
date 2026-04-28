@@ -368,9 +368,11 @@ Requires `ADMIN_API_KEY` env var. All requests must include `X-API-Key` header.
 
 ### Import historical records (remote)
 
-The endpoint returns **202 Accepted** immediately and runs the LLM parsing in the background. Records are written under the request-supplied `line_user_id` (the data owner); when the import finishes `ADMIN_LINE_USER_ID` (the operator) receives a LINE push notification with the success/skip counts (or a failure message).
+The endpoint returns **202 Accepted** immediately and runs the LLM parsing in the background. Records are written under the request-supplied `line_user_id` (the data owner); when the import finishes `ADMIN_LINE_USER_ID` (the operator) receives a LINE push notification breaking down 新增 / 已存在跳過 / 無法解析.
 
-**File format:** see [`docs/import-template.txt`](docs/import-template.txt). The hard rule is that every block starts with a `YYYY/MM/DD` line; the body uses LLM-interpreted notation (`40kg*10*4`, `8kg each`, `空`, `30sec*3`, etc.). Blank lines are tolerated. **The current pipeline is purely additive — re-importing the same file will duplicate every record.** Only run import once per dataset, or pre-clean the affected dates in Postgres.
+**Idempotency**: each block's date is checked against `training_sessions` for that user. If a session already exists for that date, the block is skipped (no LLM call). To re-import a corrected version of an existing date, call `/admin/delete-records` first to wipe that date.
+
+**File format:** see [`docs/import-template.txt`](docs/import-template.txt). The hard rule is that every block starts with a `YYYY/MM/DD` line; the body uses LLM-interpreted notation (`40kg*10*4`, `8kg each`, `空`, `30sec*3`, etc.). Blank lines are tolerated.
 
 File upload (recommended):
 
@@ -391,6 +393,22 @@ curl -X POST https://your-server.com/admin/import-history \
 ```
 
 Records older than 2 years are automatically skipped (configurable via `cutoff_years`).
+
+### Delete records in a date range
+
+Wipes one user's training / cardio / body-composition / meal / PR rows in the inclusive range. Used to correct a botched import by clearing days before re-running `/admin/import-history`.
+
+```bash
+curl -X POST https://your-server.com/admin/delete-records \
+  -H "X-API-Key: $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"line_user_id": "U...", "start_date": "2025-05-12", "end_date": "2025-05-14"}'
+```
+
+- `end_date` must be `>= start_date`. Same-day delete is allowed (`start = end`).
+- Unknown user or empty range returns `200` with zero counts (not an error).
+- Cascades: `training_sessions` → `session_exercises` / `exercise_sets` / `cardio_records` / `raw_records`; `body_compositions` → `body_segments`; `meal_logs`; `personal_records.achieved_date` in range.
+- Does NOT touch user-curated data (`user_conditions`, `user_goals`, `user_images`, profile fields, daily interactions).
 
 > Database backups are handled by Supabase (free tier: 7-day point-in-time recovery). For local SQLite dev there is no automated backup.
 

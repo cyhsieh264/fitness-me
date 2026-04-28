@@ -6,7 +6,10 @@ import logging
 import re
 from datetime import date, timedelta
 
+from sqlalchemy import select
+
 from src.db.database import async_session
+from src.db.models import TrainingSession
 from src.llm.client import chat_completion
 from src.llm.tool_executor import execute_tool
 from src.llm.tools import TOOLS
@@ -111,8 +114,20 @@ async def import_block(db, user_id: int, training_date: date, block_text: str) -
     return True
 
 
-async def run_import(line_user_id: str, raw_text: str, cutoff_years: int = DEFAULT_CUTOFF_YEARS):
-    """Import historical records from raw text. Returns (success, total) counts."""
+async def run_import(
+    line_user_id: str,
+    raw_text: str,
+    cutoff_years: int = DEFAULT_CUTOFF_YEARS,
+) -> dict[str, int]:
+    """Import historical records from raw text.
+
+    Idempotent on a per-date basis: any block whose date already has a
+    `training_sessions` row for this user is skipped (no LLM call, no
+    INSERTs). To re-import a corrected version of an existing date, use
+    /admin/delete-records first.
+
+    Returns counts: {"new", "already_existed", "llm_failed", "total"}.
+    """
     blocks = parse_date_blocks(raw_text, cutoff_years)
     logger.info("Found %d date blocks to import", len(blocks))
 
@@ -121,9 +136,25 @@ async def run_import(line_user_id: str, raw_text: str, cutoff_years: int = DEFAU
             user = await get_or_create_user(db, line_user_id)
             user_id = user.id
 
+            block_dates = [d for d, _ in blocks]
+            existing = set()
+            if block_dates:
+                result = await db.execute(
+                    select(TrainingSession.date).where(
+                        TrainingSession.user_id == user_id,
+                        TrainingSession.date.in_(block_dates),
+                    )
+                )
+                existing = {row for row in result.scalars().all()}
+
+    new_blocks = [(d, b) for d, b in blocks if d not in existing]
+    already_existed = len(blocks) - len(new_blocks)
+    if already_existed:
+        logger.info("Skipping %d blocks whose date already has a session", already_existed)
+
     success = 0
-    for i, (d, block) in enumerate(blocks):
-        logger.info("[%d/%d] Importing %s ...", i + 1, len(blocks), d)
+    for i, (d, block) in enumerate(new_blocks):
+        logger.info("[%d/%d] Importing %s ...", i + 1, len(new_blocks), d)
 
         async with async_session() as db:
             async with db.begin():
@@ -131,8 +162,15 @@ async def run_import(line_user_id: str, raw_text: str, cutoff_years: int = DEFAU
                 if ok:
                     success += 1
 
-        if i < len(blocks) - 1:
+        if i < len(new_blocks) - 1:
             await asyncio.sleep(LLM_RATE_LIMIT_SEC)
 
-    logger.info("Import complete! %d/%d records imported.", success, len(blocks))
-    return success, len(blocks)
+    llm_failed = len(new_blocks) - success
+    counts = {
+        "new": success,
+        "already_existed": already_existed,
+        "llm_failed": llm_failed,
+        "total": len(blocks),
+    }
+    logger.info("Import done: %s", counts)
+    return counts

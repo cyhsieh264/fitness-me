@@ -30,8 +30,11 @@ async def main(line_user_id: str) -> None:
     await run_seed()
 
     text = RAW_RECORD_PATH.read_text(encoding="utf-8")
-    success, total = await run_import(line_user_id, text)
-    print(f"Done: {success}/{total} records imported.")
+    counts = await run_import(line_user_id, text)
+    print(
+        f"Done: new={counts['new']}, already_existed={counts['already_existed']}, "
+        f"llm_failed={counts['llm_failed']}, total={counts['total']}"
+    )
 
 
 if __name__ == "__main__":
