@@ -65,71 +65,68 @@ def _verify_admin_api_key(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
-async def _run_import_and_notify(
-    line_user_id: str, raw_text: str, cutoff_years: int
-) -> None:
-    """Background worker: run import, then push the result via LINE.
+async def _run_import_and_notify(raw_text: str, cutoff_years: int) -> None:
+    """Background worker: import records, then push the result via LINE.
 
-    Notification goes to ADMIN_LINE_USER_ID (the operator) when set;
-    falls back to the data-owner user id so single-user setups still
-    notify without extra config.
+    Both the data-owner user_id and the notification target are taken from
+    ADMIN_LINE_USER_ID — the import is always for the admin themselves.
     """
-    notify_to = settings.admin_line_user_id or line_user_id
+    user_id = settings.admin_line_user_id
     try:
-        success, total = await run_import(line_user_id, raw_text, cutoff_years)
+        success, total = await run_import(user_id, raw_text, cutoff_years)
         skipped = total - success
         lines = [
             "歷史紀錄匯入完成",
-            f"使用者：{line_user_id}",
             f"寫入：{success}/{total} 筆",
         ]
         if skipped:
             lines.append(f"（{skipped} 筆 LLM 無法解析跳過）")
-        await push_text(notify_to, "\n".join(lines))
+        await push_text(user_id, "\n".join(lines))
     except Exception:
-        logger.exception("Background import failed for %s", line_user_id)
+        logger.exception("Background import failed for %s", user_id)
         try:
-            await push_text(
-                notify_to,
-                f"歷史紀錄匯入失敗\n使用者：{line_user_id}\n請聯絡管理員。",
-            )
+            await push_text(user_id, "歷史紀錄匯入失敗，請查看 server log。")
         except Exception:
-            logger.exception("Could not push failure notification to %s", notify_to)
+            logger.exception("Could not push failure notification to %s", user_id)
 
 
 @app.post("/admin/import-history", status_code=202)
 async def import_history(
     request: Request,
-    line_user_id: str = Form(None),
     file: UploadFile = File(None),
     cutoff_years: int = Form(2),
 ) -> dict:
     """Kick off historical-record import; returns immediately with 202.
 
-    The import (LLM parsing + DB writes) runs in the background. When it
-    finishes the user receives a LINE push message with the result.
+    The import (LLM parsing + DB writes) runs in the background and writes
+    records under ADMIN_LINE_USER_ID. When it finishes the same user gets a
+    LINE push message with the result.
 
     Accepts either:
-    - multipart form: line_user_id + file (text file upload)
-    - JSON body: {"line_user_id": "...", "raw_text": "...", "cutoff_years": 2}
+    - multipart form: `file` (text upload) [+ optional `cutoff_years`]
+    - JSON body: `{"raw_text": "...", "cutoff_years": 2}`
     """
     _verify_admin_api_key(request)
 
-    if file and line_user_id:
+    if not settings.admin_line_user_id:
+        raise HTTPException(
+            status_code=500, detail="ADMIN_LINE_USER_ID is not configured"
+        )
+
+    if file:
         raw_text = (await file.read()).decode("utf-8")
     else:
         body = await request.json()
-        line_user_id = body.get("line_user_id")
         raw_text = body.get("raw_text")
         cutoff_years = body.get("cutoff_years", 2)
 
-    if not line_user_id or not raw_text:
-        raise HTTPException(status_code=400, detail="line_user_id and raw_text/file required")
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="raw_text or file required")
 
-    asyncio.create_task(_run_import_and_notify(line_user_id, raw_text, cutoff_years))
+    asyncio.create_task(_run_import_and_notify(raw_text, cutoff_years))
     return {
         "status": "accepted",
-        "line_user_id": line_user_id,
+        "line_user_id": settings.admin_line_user_id,
         "message": "Import running in background; result will arrive via LINE.",
     }
 
