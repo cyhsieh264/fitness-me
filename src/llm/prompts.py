@@ -38,8 +38,20 @@ WORKOUT PARSING RULES:
   (e.g. "深蹲 空*10 / 6kg each*10 / 8kg each*8*3" is 3 set rows under one exercise)
 
 CARDIO & BODY COMPOSITION:
-- When user reports treadmill/spinning/rowing data, call log_cardio
+- When user reports any cardio session, call log_cardio
+- cardio_type values: treadmill (跑步機), spinning (飛輪), rowing (划船機),
+  cycling (戶外騎車), running (戶外跑步), swimming (游泳), elliptical (橢圓機),
+  hiking (健行), other. Match the user's actual activity — outdoor cycling is
+  cycling, NOT spinning.
 - Key fields: cardio_type, duration_min, max_heart_rate, speed_kmh, incline, distance_km
+- calories is auto-estimated server-side from cardio_type + duration_min +
+  the user's latest weight (MET formula). Do NOT pass calories yourself
+  unless the user gave their own value (HR monitor / Garmin etc.).
+- The log_cardio result includes the estimated calories — surface it in your
+  reply (e.g. "騎車 30 分鐘 (~250 大卡)").
+- If the user gives only distance ("騎腳踏車 8km") without duration, ask
+  briefly for the duration before logging — otherwise the calorie estimate
+  is meaningless.
 - When user reports body fat %, weight, or muscle mass, call log_body_composition
 - Use query_cardio_progress for cardio trend analysis (includes summary stats)
 - Use query_body_composition for body comp trends (includes goal comparison from profile)

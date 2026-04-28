@@ -3,9 +3,79 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import CardioRecord, TrainingSession
+from src.db.models import BodyComposition, CardioRecord, TrainingSession
 from src.services.workout import get_or_create_session
 from src.utils.time import window_dates
+
+# MET (Metabolic Equivalent) values per activity. When speed/intensity hints
+# are available we pick a higher band; otherwise the moderate row.
+# Source: 2011 Compendium of Physical Activities (commonly cited values).
+_MET_TABLE: dict[str, float] = {
+    "treadmill_walk": 3.8,    # speed < 6 km/h
+    "treadmill_jog": 7.0,     # 6 ≤ speed < 9
+    "treadmill_run": 11.0,    # speed ≥ 9
+    "spinning": 8.5,
+    "rowing": 7.0,
+    "cycling_easy": 5.0,      # speed < 16
+    "cycling_moderate": 7.5,  # 16-20
+    "cycling_vigorous": 10.0, # > 20
+    "running_moderate": 9.8,
+    "running_fast": 12.5,     # speed ≥ 12
+    "swimming": 6.0,
+    "elliptical": 5.0,
+    "hiking": 6.0,
+    "other": 6.0,
+}
+
+# Fallback weight when the user has no body_compositions row yet.
+_DEFAULT_WEIGHT_KG = 65.0
+
+
+def _met_for(cardio_type: str, speed_kmh: float | None) -> float:
+    """Pick the right MET row for an activity + intensity hint."""
+    if cardio_type == "treadmill":
+        if speed_kmh is None:
+            return _MET_TABLE["treadmill_jog"]
+        if speed_kmh < 6:
+            return _MET_TABLE["treadmill_walk"]
+        if speed_kmh < 9:
+            return _MET_TABLE["treadmill_jog"]
+        return _MET_TABLE["treadmill_run"]
+    if cardio_type == "cycling":
+        if speed_kmh is None or speed_kmh < 16:
+            return _MET_TABLE["cycling_easy"]
+        if speed_kmh < 20:
+            return _MET_TABLE["cycling_moderate"]
+        return _MET_TABLE["cycling_vigorous"]
+    if cardio_type == "running":
+        if speed_kmh is not None and speed_kmh >= 12:
+            return _MET_TABLE["running_fast"]
+        return _MET_TABLE["running_moderate"]
+    return _MET_TABLE.get(cardio_type, _MET_TABLE["other"])
+
+
+async def _latest_weight_kg(db: AsyncSession, user_id: int) -> float:
+    """Return the most recent recorded weight, or the default if none exists."""
+    result = await db.execute(
+        select(BodyComposition.weight_kg)
+        .where(BodyComposition.user_id == user_id, BodyComposition.weight_kg.isnot(None))
+        .order_by(BodyComposition.date.desc())
+        .limit(1)
+    )
+    weight = result.scalar_one_or_none()
+    return float(weight) if weight else _DEFAULT_WEIGHT_KG
+
+
+def _estimate_calories(
+    cardio_type: str,
+    duration_min: int | None,
+    speed_kmh: float | None,
+    weight_kg: float,
+) -> int | None:
+    if duration_min is None or duration_min <= 0 or weight_kg <= 0:
+        return None
+    met = _met_for(cardio_type, speed_kmh)
+    return round(met * weight_kg * 3.5 * duration_min / 200)
 
 
 async def log_cardio(
@@ -24,6 +94,14 @@ async def log_cardio(
     notes: str | None = None,
 ) -> dict[str, object]:
     session, _ = await get_or_create_session(db, user_id, training_date, "self_training")
+
+    # Auto-estimate calories from MET × weight × duration when the caller
+    # didn't supply one. User-provided values (e.g. from a HR monitor) win.
+    estimated = False
+    if calories is None:
+        weight_kg = await _latest_weight_kg(db, user_id)
+        calories = _estimate_calories(cardio_type, duration_min, speed_kmh, weight_kg)
+        estimated = calories is not None
 
     record = CardioRecord(
         session_id=session.id,
@@ -47,7 +125,10 @@ async def log_cardio(
         "date": training_date.isoformat(),
         "cardio_type": cardio_type,
         "duration_min": duration_min,
+        "distance_km": distance_km,
         "max_heart_rate": max_heart_rate,
+        "calories": calories,
+        "calories_estimated": estimated,
     }
 
 

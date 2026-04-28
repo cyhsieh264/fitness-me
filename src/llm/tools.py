@@ -352,7 +352,7 @@ TOOLS = [
                     },
                     "cardio_type": {
                         "type": "string",
-                        "enum": ["treadmill", "spinning", "rowing"],
+                        "enum": ["treadmill", "spinning", "rowing", "cycling", "running", "swimming", "elliptical", "hiking", "other"],
                     },
                     "duration_min": {
                         "type": "integer",
@@ -523,7 +523,7 @@ TOOLS = [
                     },
                     "cardio_type": {
                         "type": "string",
-                        "enum": ["treadmill", "spinning", "rowing"],
+                        "enum": ["treadmill", "spinning", "rowing", "cycling", "running", "swimming", "elliptical", "hiking", "other"],
                         "description": "Filter by type (omit for all)",
                     },
                 },
