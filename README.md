@@ -347,7 +347,7 @@ Notes:
 
 `STORAGE_PROVIDER` selects the image store:
 
-- `local`    — writes to `data/images/`. Signed URLs route back through `/images/{key}/{token}` (HMAC).
+- `local`    — writes to `data/images/`. Signed URLs route back through `/images/{key_b64}/{token}` (HMAC).
 - `supabase` — uploads to a Supabase Storage bucket. Signed URLs are minted by Supabase.
 
 To swap, change `STORAGE_PROVIDER` and the Supabase env vars; no code changes required. Implementations live in `src/storage/{base,local,supabase}.py` behind a three-method `Storage` Protocol — adding S3 / R2 / GCS later means a fourth file, no churn elsewhere.
@@ -361,6 +361,21 @@ The Storage interface is touched from exactly three places:
 3. **Serve bytes** — only relevant for LocalStorage: `GET /images/{key_b64}/{token}` in `src/main.py` verifies the HMAC and returns the file. SupabaseStorage URLs hit Supabase's CDN directly and never touch this server.
 
 Image keys are namespaced as `{line_user_id}/{category}/{message_id}.jpg` so a backend swap can rsync / migrate by prefix.
+
+## HTTP Endpoints
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `GET`  | `/health`                   | none                  | Liveness probe (used by Caddy / Fly / GCP healthcheck). |
+| `POST` | `/webhook`                  | LINE signature        | LINE Messaging API webhook — text and image events. Returns 200 immediately and dispatches handlers via `asyncio.create_task` so the LINE reply token doesn't time out. |
+| `GET`  | `/images/{key_b64}/{token}` | HMAC token in path    | Serve a locally-stored image. Only active when `STORAGE_PROVIDER=local`; SupabaseStorage URLs go straight to Supabase's CDN and never touch this route. |
+| `POST` | `/admin/import-history`     | `X-API-Key` header    | Bulk import historical records from a text file. Returns **202** immediately; result lands as a LINE push to `ADMIN_LINE_USER_ID`. Idempotent per date. See [Admin API](#admin-api). |
+| `POST` | `/admin/delete-records`     | `X-API-Key` header    | Wipe a user's training / cardio / body-comp / meal / PR rows in an inclusive date range. Returns **200** with row counts. See [Admin API](#admin-api). |
+
+Background work that has no HTTP surface:
+
+- App startup runs `Base.metadata.create_all` and seeds the exercise / muscle / alias dictionary (idempotent — re-runs cheaply).
+- APScheduler in-process jobs: **08:00** (Taipei, ±1h jitter) daily push, **23:59** daily cleanup (chat messages 7 days, daily interactions / raw records / resolved conditions 90 days).
 
 ## Admin API
 
