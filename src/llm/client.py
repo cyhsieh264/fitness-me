@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 2
 TIMEOUT_SECONDS = 30
 
+# Errors we should NOT retry on. Retrying just burns more quota or repeats
+# a known-bad credential. We re-raise so callers can surface a friendly
+# "service paused" reply.
+NON_RETRYABLE = (litellm.RateLimitError, litellm.AuthenticationError)
+
 
 async def chat_completion(
     messages: list[dict],  # type: ignore[type-arg]
@@ -29,6 +34,9 @@ async def chat_completion(
                 timeout=TIMEOUT_SECONDS,
             )
             return response
+        except NON_RETRYABLE:
+            # Quota / auth — propagate immediately, do not retry.
+            raise
         except Exception as e:
             last_error = e
             if attempt < MAX_RETRIES:

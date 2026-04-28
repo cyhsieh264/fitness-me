@@ -136,6 +136,10 @@ async def classify_and_parse_image(image_bytes: bytes) -> dict | None:
         content = content.strip()
 
         return json.loads(content)
+    except (litellm.RateLimitError, litellm.AuthenticationError):
+        # Bubble these up so the LINE handler can show a service-paused
+        # message rather than the generic "couldn't process image" reply.
+        raise
     except Exception:
         logger.exception("Failed to classify/parse image")
         return None

@@ -4,6 +4,7 @@ import re
 import time
 from datetime import date
 
+import litellm
 from linebot.v3.messaging import (
     AsyncApiClient,
     AsyncMessagingApi,
@@ -37,6 +38,10 @@ logger = logging.getLogger(__name__)
 
 LINE_MESSAGE_MAX_LENGTH = 5000
 REPLY_TOKEN_TIMEOUT_SEC = 25
+
+SERVICE_PAUSED_MESSAGE = (
+    "目前暫停提供服務（API 配額或認證異常），請稍後再試或聯絡管理員。"
+)
 
 DAILY_PUSH_CONTEXT = """
 
@@ -117,6 +122,9 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
 
     try:
         response = await chat_completion(messages=messages, tools=TOOLS)
+    except (litellm.RateLimitError, litellm.AuthenticationError):
+        logger.exception("LLM quota / auth error — pausing service reply")
+        return SERVICE_PAUSED_MESSAGE
     except Exception:
         logger.exception("LLM call failed")
         return "Something went wrong, please try again."
@@ -168,6 +176,9 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
     # Turn 2: LLM generates final response from tool results
     try:
         response2 = await chat_completion(messages=messages)
+    except (litellm.RateLimitError, litellm.AuthenticationError):
+        logger.exception("LLM quota / auth error on turn 2 — pausing service reply")
+        return SERVICE_PAUSED_MESSAGE
     except Exception:
         logger.exception("LLM turn 2 failed")
         return "Recorded, but failed to generate summary."
@@ -278,7 +289,12 @@ async def handle_image_message(event: MessageEvent) -> None:
 
     # Classify and parse with vision model
     raw_bytes = bytes(image_bytes)
-    parsed = await classify_and_parse_image(raw_bytes)
+    try:
+        parsed = await classify_and_parse_image(raw_bytes)
+    except (litellm.RateLimitError, litellm.AuthenticationError):
+        logger.exception("Vision quota / auth error — pausing service reply")
+        await _send_reply(line_user_id, reply_token, SERVICE_PAUSED_MESSAGE, start)
+        return
 
     if parsed is None:
         await _send_reply(

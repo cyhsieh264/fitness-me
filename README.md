@@ -489,7 +489,7 @@ Set under **Settings → Secrets and variables → Actions**:
 | `LINE_CHANNEL_ACCESS_TOKEN` | LINE Developers Console |
 | `LLM_PROVIDER` | `gemini` |
 | `LLM_API_KEY` | Google AI Studio |
-| `LLM_MODEL` | `gemini/gemini-2.0-flash` |
+| `LLM_MODEL` | `gemini/gemini-2.5-flash` |
 | `DATABASE_URL` | Supabase Session Pooler URI, prefixed with `postgresql+asyncpg://` |
 | `STORAGE_PROVIDER` | `supabase` |
 | `SUPABASE_URL` | Supabase project URL |
