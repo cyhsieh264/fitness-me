@@ -72,14 +72,21 @@ async def _run_import_and_notify(
     try:
         success, total = await run_import(line_user_id, raw_text, cutoff_years)
         skipped = total - success
-        msg = f"歷史紀錄匯入完成：{success}/{total} 筆已寫入"
+        lines = [
+            "歷史紀錄匯入完成",
+            f"使用者：{line_user_id}",
+            f"寫入：{success}/{total} 筆",
+        ]
         if skipped:
-            msg += f"（{skipped} 筆 LLM 無法解析跳過）"
-        await push_text(line_user_id, msg)
+            lines.append(f"（{skipped} 筆 LLM 無法解析跳過）")
+        await push_text(line_user_id, "\n".join(lines))
     except Exception:
         logger.exception("Background import failed for %s", line_user_id)
         try:
-            await push_text(line_user_id, "歷史紀錄匯入失敗，請聯絡管理員。")
+            await push_text(
+                line_user_id,
+                f"歷史紀錄匯入失敗\n使用者：{line_user_id}\n請聯絡管理員。",
+            )
         except Exception:
             logger.exception("Could not push failure notification to %s", line_user_id)
 
@@ -116,6 +123,7 @@ async def import_history(
     asyncio.create_task(_run_import_and_notify(line_user_id, raw_text, cutoff_years))
     return {
         "status": "accepted",
+        "line_user_id": line_user_id,
         "message": "Import running in background; result will arrive via LINE.",
     }
 
