@@ -1,0 +1,22 @@
+# Caddy auto-HTTPS reverse proxy. DOMAIN is loaded from .env at start.
+# Caddy obtains and renews a Let's Encrypt certificate automatically — as long
+# as the public DNS for {$DOMAIN} resolves to this host and 80/443 are reachable.
+
+{$DOMAIN} {
+    reverse_proxy app:8000
+
+    # Reasonable defaults for a single-tenant LINE bot:
+    # - Drop large bodies that aren't ours (images go to Supabase, not us)
+    request_body {
+        max_size 10MB
+    }
+
+    encode zstd gzip
+
+    # Tighten the default access log to errors + 4xx/5xx; the bot itself
+    # already has structured INFO logging.
+    log {
+        output stderr
+        level WARN
+    }
+}

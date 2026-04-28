@@ -398,26 +398,91 @@ uv run pytest
 
 ## Deploy
 
-Configured for **Fly.io (Tokyo, `nrt`) + Supabase**.
+Target stack: **GCP e2-micro (Always Free) + Docker Compose + Caddy** in front, **Supabase** for Postgres + Storage. CI/CD via GitHub Actions — every push to `main` builds an image, ships it to GHCR, and redeploys on the VM.
+
+### One-time VM bootstrap
+
+On a freshly-created Ubuntu e2-micro:
 
 ```bash
-fly launch --no-deploy        # one-time, picks app name
-fly secrets set \
-  LINE_CHANNEL_SECRET=... \
-  LINE_CHANNEL_ACCESS_TOKEN=... \
-  LLM_API_KEY=... \
-  DATABASE_URL='postgresql+asyncpg://postgres.<ref>:<pwd>@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres' \
-  SUPABASE_URL=https://<ref>.supabase.co \
-  SUPABASE_SERVICE_KEY=... \
-  SUPABASE_BUCKET=fitness-images \
-  ALLOWED_USER_IDS=U... \
-  ADMIN_TOKEN=... \
-  BASE_URL=https://<your-app>.fly.dev
-fly deploy
+# 2 GB swap (1 GB RAM is tight for Docker + Python + Caddy)
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# Docker
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+ARCH=$(dpkg --print-architecture)
+CODENAME=$(. /etc/os-release && echo $VERSION_CODENAME)
+echo "deb [arch=$ARCH signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $CODENAME stable" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker $USER       # log out + back in for this to take effect
+
+# Authenticate to GHCR (private image)
+read -s GHCR_TOKEN                  # paste a PAT with read:packages scope
+echo $GHCR_TOKEN | docker login ghcr.io -u <your-github-username> --password-stdin
+unset GHCR_TOKEN
+
+# SSH key the GitHub Actions deploy job will use to log back in
+ssh-keygen -t ed25519 -f ~/.ssh/gha_deploy -N "" -C "github-actions-deploy"
+cat ~/.ssh/gha_deploy.pub >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+cat ~/.ssh/gha_deploy               # copy the entire private key for VM_SSH_KEY below
+
+mkdir -p ~/fitness-me               # destination for docker-compose.yml + .env
 ```
 
-Then point the LINE webhook to `https://<your-app>.fly.dev/webhook`.
+### Hostname (no domain required)
 
-The Supabase connection string **must** use the **Session Pooler** (port 5432 on the pooler hostname). Direct (5432) is IPv6-only on the free tier and will fail from Fly; Transaction Pooler (6543) breaks SQLAlchemy's prepared-statement cache.
+This stack uses the public DNS shortcut **`<your-static-ip>.nip.io`** — `nip.io` deterministically resolves any IP-encoded subdomain to that IP, so a fresh GCP VM has an HTTPS-eligible hostname instantly. Caddy obtains a Let's Encrypt cert against it on first start.
 
-To run with local-volume storage instead of Supabase Storage, set `STORAGE_PROVIDER=local` and uncomment the `[[mounts]]` block in `fly.toml`.
+### GitHub repo secrets
+
+Set under **Settings → Secrets and variables → Actions**:
+
+| Name | Source / value |
+|------|----------------|
+| `VM_HOST` | VM's static external IP |
+| `VM_USER` | Linux user the deploy SSHes in as |
+| `VM_SSH_KEY` | Private key from `cat ~/.ssh/gha_deploy` (full text, including BEGIN/END lines) |
+| `LINE_CHANNEL_SECRET` | LINE Developers Console |
+| `LINE_CHANNEL_ACCESS_TOKEN` | LINE Developers Console |
+| `LLM_PROVIDER` | `gemini` |
+| `LLM_API_KEY` | Google AI Studio |
+| `LLM_MODEL` | `gemini/gemini-2.0-flash` |
+| `DATABASE_URL` | Supabase Session Pooler URI, prefixed with `postgresql+asyncpg://` |
+| `STORAGE_PROVIDER` | `supabase` |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_KEY` | Supabase service role key |
+| `SUPABASE_BUCKET` | `fitness-images` |
+| `ALLOWED_USER_IDS` | Your LINE user ID(s), comma-separated |
+| `ADMIN_TOKEN` | `openssl rand -hex 32` |
+| `BASE_URL` | `https://<ip>.nip.io` |
+| `TIMEZONE` | `Asia/Taipei` |
+| `DOMAIN` | `<ip>.nip.io` (Caddy uses this; no protocol prefix) |
+
+### First deploy
+
+Push to `main`. The workflow at `.github/workflows/deploy.yml`:
+
+1. Runs `pytest`
+2. Builds the Docker image and pushes `ghcr.io/<owner>/fitness-me:{latest,sha}`
+3. SCPs `deploy/docker-compose.yml` + `deploy/Caddyfile` to `~/fitness-me/`
+4. SSHes in, writes `.env` from secrets, runs `docker compose pull && docker compose up -d`
+
+Caddy obtains the Let's Encrypt certificate on first start (~30 seconds). Then point LINE webhook to `https://<ip>.nip.io/webhook`.
+
+### Day-2 ops
+
+| Task | How |
+|------|-----|
+| Ship a code change | `git push` to `main` |
+| Rotate a secret | Update GitHub secret, re-trigger workflow (or any push) |
+| Rebuild VM from scratch | Re-run the bootstrap, set `VM_HOST` if IP changed, re-run workflow |
+| Tail app logs | `ssh <vm> 'docker compose -f ~/fitness-me/docker-compose.yml logs -f app'` |
+| Tail Caddy logs | same with `... logs -f caddy` |
+
+The Supabase connection string **must** use the **Session Pooler** (port 5432 on the pooler hostname). Direct (5432) is IPv6-only on the free tier; Transaction Pooler (6543) breaks SQLAlchemy's prepared-statement cache.
