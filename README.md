@@ -368,13 +368,14 @@ Requires `ADMIN_API_KEY` env var. All requests must include `X-API-Key` header.
 
 ### Import historical records (remote)
 
-The endpoint returns **202 Accepted** immediately and runs the LLM parsing in the background. When the import finishes, `ADMIN_LINE_USER_ID` receives a LINE push notification with the success/skip counts (or a failure message). The records are written under that same `ADMIN_LINE_USER_ID`, so the endpoint takes no `line_user_id` parameter.
+The endpoint returns **202 Accepted** immediately and runs the LLM parsing in the background. Records are written under the request-supplied `line_user_id` (the data owner); when the import finishes `ADMIN_LINE_USER_ID` (the operator) receives a LINE push notification with the success/skip counts (or a failure message).
 
 File upload (recommended):
 
 ```bash
 curl -X POST https://your-server.com/admin/import-history \
   -H "X-API-Key: $ADMIN_API_KEY" \
+  -F "line_user_id=U..." \
   -F "file=@records.txt"
 ```
 
@@ -384,7 +385,7 @@ Or JSON body:
 curl -X POST https://your-server.com/admin/import-history \
   -H "X-API-Key: $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"raw_text": "..."}'
+  -d '{"line_user_id": "U...", "raw_text": "..."}'
 ```
 
 Records older than 2 years are automatically skipped (configurable via `cutoff_years`).
@@ -461,7 +462,7 @@ Set under **Settings → Secrets and variables → Actions**:
 | `SUPABASE_BUCKET` | `fitness-images` |
 | `ALLOWED_USER_IDS` | Your LINE user ID(s), comma-separated |
 | `ADMIN_API_KEY` | `openssl rand -hex 32` |
-| `ADMIN_LINE_USER_ID` | LINE user id that receives admin notifications (e.g. import completion). Required — also used as the data-owner id for `/admin/import-history`. |
+| `ADMIN_LINE_USER_ID` | LINE user id (the operator) that receives admin notifications such as import-completion pushes. Required for `/admin/import-history`. |
 | `BASE_URL` | `https://<ip>.nip.io` |
 | `TIMEZONE` | `Asia/Taipei` |
 | `DOMAIN` | `<ip>.nip.io` (Caddy uses this; no protocol prefix) |
