@@ -13,10 +13,10 @@
 
     encode zstd gzip
 
-    # Tighten the default access log to errors + 4xx/5xx; the bot itself
-    # already has structured INFO logging.
+    # Access log at INFO during early deployment so we can see request
+    # patterns / latencies. Tighten to WARN once the deploy is stable.
     log {
         output stderr
-        level WARN
+        level INFO
     }
 }
