@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import logging
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -9,7 +10,7 @@ from linebot.v3.webhooks import ImageMessageContent, MessageEvent, TextMessageCo
 
 from scripts.seed import run_seed
 from src.config import settings
-from src.line.handler import handle_image_message, handle_text_message
+from src.line.handler import handle_image_message, handle_text_message, push_text
 from src.services.import_records import run_import
 from src.services.scheduler import check_and_send_missed_push, start_scheduler, stop_scheduler
 from src.storage import get_storage
@@ -57,26 +58,49 @@ async def serve_image(key_b64: str, token: str) -> FileResponse:
     return FileResponse(path, media_type="image/jpeg")
 
 
-def _verify_admin(request: Request) -> None:
-    token = request.headers.get("X-Admin-Token", "")
-    if not settings.admin_token or token != settings.admin_token:
+def _verify_admin_api_key(request: Request) -> None:
+    given = request.headers.get("X-API-Key", "")
+    expected = settings.admin_api_key
+    if not expected or not hmac.compare_digest(given, expected):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
-@app.post("/admin/import-history")
+async def _run_import_and_notify(
+    line_user_id: str, raw_text: str, cutoff_years: int
+) -> None:
+    """Background worker: run import, then push the result back via LINE."""
+    try:
+        success, total = await run_import(line_user_id, raw_text, cutoff_years)
+        skipped = total - success
+        msg = f"歷史紀錄匯入完成：{success}/{total} 筆已寫入"
+        if skipped:
+            msg += f"（{skipped} 筆 LLM 無法解析跳過）"
+        await push_text(line_user_id, msg)
+    except Exception:
+        logger.exception("Background import failed for %s", line_user_id)
+        try:
+            await push_text(line_user_id, "歷史紀錄匯入失敗，請聯絡管理員。")
+        except Exception:
+            logger.exception("Could not push failure notification to %s", line_user_id)
+
+
+@app.post("/admin/import-history", status_code=202)
 async def import_history(
     request: Request,
     line_user_id: str = Form(None),
     file: UploadFile = File(None),
     cutoff_years: int = Form(2),
 ) -> dict:
-    """Import historical records via LLM parsing.
+    """Kick off historical-record import; returns immediately with 202.
+
+    The import (LLM parsing + DB writes) runs in the background. When it
+    finishes the user receives a LINE push message with the result.
 
     Accepts either:
     - multipart form: line_user_id + file (text file upload)
     - JSON body: {"line_user_id": "...", "raw_text": "...", "cutoff_years": 2}
     """
-    _verify_admin(request)
+    _verify_admin_api_key(request)
 
     if file and line_user_id:
         raw_text = (await file.read()).decode("utf-8")
@@ -89,8 +113,11 @@ async def import_history(
     if not line_user_id or not raw_text:
         raise HTTPException(status_code=400, detail="line_user_id and raw_text/file required")
 
-    success, total = await run_import(line_user_id, raw_text, cutoff_years)
-    return {"success": success, "total": total}
+    asyncio.create_task(_run_import_and_notify(line_user_id, raw_text, cutoff_years))
+    return {
+        "status": "accepted",
+        "message": "Import running in background; result will arrive via LINE.",
+    }
 
 
 @app.post("/webhook")

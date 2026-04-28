@@ -364,15 +364,17 @@ Image keys are namespaced as `{line_user_id}/{category}/{message_id}.jpg` so a b
 
 ## Admin API
 
-Requires `ADMIN_TOKEN` env var. All requests must include `X-Admin-Token` header.
+Requires `ADMIN_API_KEY` env var. All requests must include `X-API-Key` header.
 
 ### Import historical records (remote)
+
+The endpoint returns **202 Accepted** immediately and runs the LLM parsing in the background. When the import finishes, the user receives a LINE push notification with the success/skip counts (or a failure message).
 
 File upload (recommended):
 
 ```bash
 curl -X POST https://your-server.com/admin/import-history \
-  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -H "X-API-Key: $ADMIN_API_KEY" \
   -F "line_user_id=U..." \
   -F "file=@records.txt"
 ```
@@ -381,7 +383,7 @@ Or JSON body:
 
 ```bash
 curl -X POST https://your-server.com/admin/import-history \
-  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -H "X-API-Key: $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"line_user_id": "U...", "raw_text": "..."}'
 ```
@@ -459,7 +461,7 @@ Set under **Settings → Secrets and variables → Actions**:
 | `SUPABASE_SERVICE_KEY` | Supabase service role key |
 | `SUPABASE_BUCKET` | `fitness-images` |
 | `ALLOWED_USER_IDS` | Your LINE user ID(s), comma-separated |
-| `ADMIN_TOKEN` | `openssl rand -hex 32` |
+| `ADMIN_API_KEY` | `openssl rand -hex 32` |
 | `BASE_URL` | `https://<ip>.nip.io` |
 | `TIMEZONE` | `Asia/Taipei` |
 | `DOMAIN` | `<ip>.nip.io` (Caddy uses this; no protocol prefix) |

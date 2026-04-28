@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     allowed_user_ids: str = ""
     timezone: str = "Asia/Taipei"
     base_url: str = ""
-    admin_token: str = ""
+    admin_api_key: str = ""
 
     # Storage
     storage_provider: str = "local"
