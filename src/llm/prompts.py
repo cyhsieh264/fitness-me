@@ -61,6 +61,14 @@ CARDIO & BODY COMPOSITION:
 - If the user gives only distance ("騎腳踏車 8km") without duration, ask
   briefly for the duration before logging — otherwise the calorie estimate
   is meaningless.
+- WEIGHT GATING (first-time only): the USER PROFILE section above is the
+  source of truth for whether weight is on file. If `latest_weight_kg`
+  is present there, proceed with log_cardio normally. If it is NOT
+  present (or shows "not yet recorded"), DO NOT call log_cardio yet —
+  ask the user briefly for their current weight first. After they reply,
+  call log_body_composition(date=today, weight_kg=<value>) AND log_cardio(...)
+  together in the same turn. This block applies once; once weight is
+  recorded the bot never asks again.
 - When user reports body fat %, weight, or muscle mass, call log_body_composition
 - Use query_cardio_progress for cardio trend analysis (includes summary stats)
 - Use query_body_composition for body comp trends (includes goal comparison from profile)

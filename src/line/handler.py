@@ -79,11 +79,19 @@ async def handle_text_message(event: MessageEvent) -> None:
 async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
     system_prompt = SYSTEM_PROMPT
 
-    # Inject user profile into system prompt
+    # Inject user profile into system prompt. latest_weight_kg is special-
+    # cased so the LLM sees an explicit "not yet recorded" — the absence of
+    # a key would be ambiguous.
     profile = await get_profile_summary(db, user_id)
-    profile_parts = [f"- {k}: {v}" for k, v in profile.items() if v is not None]
-    if profile_parts:
-        system_prompt += "\n\nUSER PROFILE:\n" + "\n".join(profile_parts)
+    profile_parts: list[str] = []
+    for key, value in profile.items():
+        if key == "latest_weight_kg":
+            profile_parts.append(
+                f"- latest_weight_kg: {value}" if value else "- latest_weight_kg: not yet recorded"
+            )
+        elif value is not None:
+            profile_parts.append(f"- {key}: {value}")
+    system_prompt += "\n\nUSER PROFILE:\n" + "\n".join(profile_parts)
 
     # Inject active goals into system prompt
     active_goals = await get_active_goals(db, user_id)
