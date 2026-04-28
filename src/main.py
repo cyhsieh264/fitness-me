@@ -68,7 +68,13 @@ def _verify_admin_api_key(request: Request) -> None:
 async def _run_import_and_notify(
     line_user_id: str, raw_text: str, cutoff_years: int
 ) -> None:
-    """Background worker: run import, then push the result back via LINE."""
+    """Background worker: run import, then push the result via LINE.
+
+    Notification goes to ADMIN_LINE_USER_ID (the operator) when set;
+    falls back to the data-owner user id so single-user setups still
+    notify without extra config.
+    """
+    notify_to = settings.admin_line_user_id or line_user_id
     try:
         success, total = await run_import(line_user_id, raw_text, cutoff_years)
         skipped = total - success
@@ -79,16 +85,16 @@ async def _run_import_and_notify(
         ]
         if skipped:
             lines.append(f"（{skipped} 筆 LLM 無法解析跳過）")
-        await push_text(line_user_id, "\n".join(lines))
+        await push_text(notify_to, "\n".join(lines))
     except Exception:
         logger.exception("Background import failed for %s", line_user_id)
         try:
             await push_text(
-                line_user_id,
+                notify_to,
                 f"歷史紀錄匯入失敗\n使用者：{line_user_id}\n請聯絡管理員。",
             )
         except Exception:
-            logger.exception("Could not push failure notification to %s", line_user_id)
+            logger.exception("Could not push failure notification to %s", notify_to)
 
 
 @app.post("/admin/import-history", status_code=202)

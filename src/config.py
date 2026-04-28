@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Taipei"
     base_url: str = ""
     admin_api_key: str = ""
+    admin_line_user_id: str = ""
 
     # Storage
     storage_provider: str = "local"

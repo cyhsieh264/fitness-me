@@ -462,6 +462,7 @@ Set under **Settings → Secrets and variables → Actions**:
 | `SUPABASE_BUCKET` | `fitness-images` |
 | `ALLOWED_USER_IDS` | Your LINE user ID(s), comma-separated |
 | `ADMIN_API_KEY` | `openssl rand -hex 32` |
+| `ADMIN_LINE_USER_ID` | LINE user id that receives admin notifications (e.g. import completion). Optional — falls back to the per-request data owner if empty. |
 | `BASE_URL` | `https://<ip>.nip.io` |
 | `TIMEZONE` | `Asia/Taipei` |
 | `DOMAIN` | `<ip>.nip.io` (Caddy uses this; no protocol prefix) |
