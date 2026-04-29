@@ -12,7 +12,10 @@ dependencies = [
     "asyncpg>=0.29.0",
     "alembic>=1.13.0",
     "apscheduler>=3.10.0",
-    "litellm>=1.40.0",
+    # >=1.83.7 to clear the 2026 CVE chain (bytecode rewriting RCE, MCP
+    # command injection, proxy SQLi). Versions 1.82.7 / 1.82.8 are the
+    # supply-chain-compromised releases; pinning above that range avoids them.
+    "litellm>=1.83.7",
     "pydantic-settings>=2.0.0",
     "httpx>=0.27.0",
     "python-multipart>=0.0.9",
