@@ -46,16 +46,45 @@ SERVICE_PAUSED_MESSAGE = (
 DAILY_PUSH_CONTEXT = """
 
 DAILY PUSH RESPONSE:
-A daily push greeting was sent to the user this morning. They are now replying.
-Determine their plan from their reply and call update_daily_plan:
-- Training/workout alone -> user_plan = "self_training"
-- Coach/trainer session -> user_plan = "coach"
-- Rest/off day -> user_plan = "rest"
-- Other sports/activities -> user_plan = "other"
+The user is replying to today's morning push. They are stating their PLAN —
+they have not done the workout yet. Steps:
 
-If the result includes recommendation_context (for self_training), use it to suggest
-a workout plan. Consider which muscle groups were trained recently (avoid same muscles
-within 48h), any active conditions, and their fitness goals.
+1. Call update_daily_plan exactly once with their parsed intent:
+   - 自主練 / 健身 / 自己練 / 想練 → user_plan = "self_training"
+   - 教練 / 教練課 → user_plan = "coach"
+   - 休息 / 不練 / 休 → user_plan = "rest"
+   - 跑步 / 登山 / 騎車 / 游泳 / 其他運動 → user_plan = "other"
+
+2. **DO NOT** call log_strength_training, log_cardio, or any other
+   logging tool here. The user has NOT done the workout yet — they're
+   stating intent. Logging fires only when they later report completed
+   sets / reps / minutes.
+
+3. Based on user_plan, compose a reply in 繁體中文:
+
+   user_plan = "self_training":
+     建議一套今天的菜單，**固定格式**：
+     - 🏋️ 重訓 1（複合 / 全身）：譬如深蹲、硬舉、引體向上、滑輪下拉、臥推
+     - 🏋️ 重訓 2（局部 / 單關節）：譬如二頭彎舉、三頭下壓、側平舉、腿後彎舉
+     - 🚶 有氧（明確機器 + 速度/坡度/時間）：
+         例「跑步機快走 30 分鐘，速度 4.5 km/h，坡度 10」
+     - 🔥 預估熱量消耗：用 cardio MET × USER PROFILE 的 latest_weight_kg
+         在 head 估算（譬如「跑步機快走 30min ≈ 200 大卡」）
+     - 🥩 蛋白質提醒：latest_weight_kg × 1.6g（譬如 54kg → 約 86g）
+
+     選動作時考慮：
+       • 近 7 天訓練過的肌群 → 避開 48 小時內練過的同肌群
+       • 活躍 user_conditions（譬如「左骨盆高」→ 避免單邊重壓）
+       • 活躍目標（譬如深蹲突破 → 安排深蹲）
+
+   user_plan = "coach":
+     簡短鼓勵一句、提醒帶水暖身。**不要建議動作**（教練會安排）。
+
+   user_plan = "rest":
+     肯定休息也是訓練一部分，提醒輕度拉伸 / 補水 / 蛋白質仍要吃夠。
+
+   user_plan = "other"（跑步 / 登山 / 騎車 / 游泳 etc）:
+     簡短鼓勵 + 預估熱量（用對應 cardio MET 估）+ 提醒補水。
 """
 
 configuration = Configuration(access_token=settings.line_channel_access_token)
