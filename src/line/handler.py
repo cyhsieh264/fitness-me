@@ -131,8 +131,16 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
 
     message = response.choices[0].message
     tool_calls = message.tool_calls
+    finish_reason = getattr(response.choices[0], "finish_reason", "?")
 
     if not tool_calls:
+        if not message.content:
+            logger.warning(
+                "LLM returned empty response (finish_reason=%s) for user text "
+                "preview=%r",
+                finish_reason,
+                text[:200],
+            )
         reply = message.content or "..."
         await save_message(db, user_id, "user", text)
         await save_message(db, user_id, "assistant", reply)
