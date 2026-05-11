@@ -97,6 +97,10 @@ async def import_block(db, user_id: int, training_date: date, block_text: str) -
         logger.exception("LLM call failed for %s", training_date)
         return False
 
+    if not response.choices:
+        logger.warning("LLM returned no choices for %s", training_date)
+        return False
+
     message = response.choices[0].message
     if not message.tool_calls:
         logger.warning("No tool calls for %s", training_date)

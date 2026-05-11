@@ -129,6 +129,14 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
         logger.exception("LLM call failed")
         return "Something went wrong, please try again."
 
+    # Same defensive guard as turn 2 — Gemini may return empty choices.
+    if not response.choices:
+        logger.warning("LLM turn 1 returned no choices at all for text=%r", text[:200])
+        reply = "..."
+        await save_message(db, user_id, "user", text)
+        await save_message(db, user_id, "assistant", reply)
+        return reply
+
     message = response.choices[0].message
     tool_calls = message.tool_calls
     finish_reason = getattr(response.choices[0], "finish_reason", "?")
