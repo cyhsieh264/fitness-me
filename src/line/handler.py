@@ -43,6 +43,10 @@ SERVICE_PAUSED_MESSAGE = (
     "目前暫停提供服務（API 配額或認證異常），請稍後再試或聯絡管理員。"
 )
 
+# Used when the LLM returns no choices / empty content. Better than "..." —
+# gives the user something to react to instead of a dead-end.
+EMPTY_RESPONSE_MESSAGE = "嗯，我沒抓到你的意思，可以再講清楚一點嗎？"
+
 DAILY_PUSH_CONTEXT = """
 
 DAILY PUSH RESPONSE:
@@ -54,6 +58,13 @@ they have not done the workout yet. Steps:
    - 教練 / 教練課 → user_plan = "coach"
    - 休息 / 不練 / 休 → user_plan = "rest"
    - 跑步 / 登山 / 騎車 / 游泳 / 其他運動 → user_plan = "other"
+
+   **Hedged wording maps to the closest plan, never freeze**:
+     "可能會自主練" / "應該會自己練" / "看狀況可能練" → self_training
+     "也許會去跑步" → other
+     "今天應該休息" → rest
+     即使使用者用「可能」「應該」「看心情」等不確定詞，**也要選一個 plan
+     繼續流程**，不要追問或返空。
 
 2. **DO NOT** call log_strength_training, log_cardio, or any other
    logging tool here. The user has NOT done the workout yet — they're
@@ -172,7 +183,7 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
     # Same defensive guard as turn 2 — Gemini may return empty choices.
     if not response.choices:
         logger.warning("LLM turn 1 returned no choices at all for text=%r", text[:200])
-        reply = "..."
+        reply = EMPTY_RESPONSE_MESSAGE
         await save_message(db, user_id, "user", text)
         await save_message(db, user_id, "assistant", reply)
         return reply
@@ -189,7 +200,9 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
                 finish_reason,
                 text[:200],
             )
-        reply = message.content or "..."
+            reply = EMPTY_RESPONSE_MESSAGE
+        else:
+            reply = message.content
         await save_message(db, user_id, "user", text)
         await save_message(db, user_id, "assistant", reply)
         return reply
