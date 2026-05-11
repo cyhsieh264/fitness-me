@@ -474,7 +474,9 @@ mkdir -p ~/fitness-me               # destination for docker-compose.yml + .env
 
 ### Hostname (no domain required)
 
-This stack uses the public DNS shortcut **`<your-static-ip>.nip.io`** — `nip.io` deterministically resolves any IP-encoded subdomain to that IP, so a fresh GCP VM has an HTTPS-eligible hostname instantly. Caddy obtains a Let's Encrypt cert against it on first start.
+This stack uses **DuckDNS** for a free, stable hostname (e.g. `fitness-me.duckdns.org`). Register a subdomain at [duckdns.org](https://www.duckdns.org) (Google login), point its `current ip` field to the VM's static external IP, and Caddy obtains a Let's Encrypt cert against it on first start. If the VM IP ever changes, only the DuckDNS dashboard entry has to be updated — the URL stays the same.
+
+`nip.io` (`<your-static-ip>.nip.io`) is a working fallback when you don't want to register a name; both options are interchangeable from the app's point of view.
 
 ### GitHub repo secrets
 
@@ -498,9 +500,9 @@ Set under **Settings → Secrets and variables → Actions**:
 | `ALLOWED_USER_IDS` | Your LINE user ID(s), comma-separated |
 | `ADMIN_API_KEY` | `openssl rand -hex 32` |
 | `ADMIN_LINE_USER_ID` | LINE user id (the operator) that receives admin notifications such as import-completion pushes. Required for `/admin/import-history`. |
-| `BASE_URL` | `https://<ip>.nip.io` |
+| `BASE_URL` | `https://<your-subdomain>.duckdns.org` |
 | `TIMEZONE` | `Asia/Taipei` |
-| `DOMAIN` | `<ip>.nip.io` (Caddy uses this; no protocol prefix) |
+| `DOMAIN` | `<your-subdomain>.duckdns.org` (Caddy uses this; no protocol prefix) |
 
 ### First deploy
 
@@ -511,7 +513,7 @@ Push to `main`. The workflow at `.github/workflows/deploy.yml`:
 3. SCPs `deploy/docker-compose.yml` + `deploy/Caddyfile` to `~/fitness-me/`
 4. SSHes in, writes `.env` from secrets, runs `docker compose pull && docker compose up -d`
 
-Caddy obtains the Let's Encrypt certificate on first start (~30 seconds). Then point LINE webhook to `https://<ip>.nip.io/webhook`.
+Caddy obtains the Let's Encrypt certificate on first start (~30 seconds). Then point LINE webhook to `https://<your-subdomain>.duckdns.org/webhook`.
 
 ### Day-2 ops
 
