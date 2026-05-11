@@ -4,9 +4,27 @@ Uses the Service Role key for server-side access. Signed URLs are minted
 by Supabase and have an explicit expiry, so we do not add our own HMAC.
 """
 
+import logging
+
 import httpx
 
 from src.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def _raise_with_body(r: httpx.Response, op: str) -> None:
+    """Like r.raise_for_status() but surfaces the response body in the log
+    so 4xx from Supabase actually tells us what went wrong."""
+    if r.is_success:
+        return
+    body = ""
+    try:
+        body = r.text[:500]
+    except Exception:
+        pass
+    logger.error("Supabase storage %s failed: %s %s — body=%r", op, r.status_code, r.reason_phrase, body)
+    r.raise_for_status()
 
 
 class SupabaseStorage:
@@ -34,14 +52,14 @@ class SupabaseStorage:
         }
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(url, content=data, headers=headers)
-            r.raise_for_status()
+            _raise_with_body(r, "save")
 
     async def signed_url(self, key: str, expires_in: int = 3600) -> str:
         url = f"{self.base}/storage/v1/object/sign/{self.bucket}/{key}"
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(url, json={"expiresIn": expires_in}, headers=headers)
-            r.raise_for_status()
+            _raise_with_body(r, "signed_url")
             signed_path = r.json()["signedURL"]
         # Supabase returns a path like "/object/sign/bucket/key?token=..." — prefix with host.
         return f"{self.base}/storage/v1{signed_path}"
