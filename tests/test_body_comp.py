@@ -23,14 +23,16 @@ async def test_log_body_composition(db: AsyncSession, user: User):
     assert result["weight_kg"] == 58.0
 
 
-async def test_body_comp_history(db: AsyncSession, user: User):
-    await log_body_composition(db, user.id, date(2026, 2, 1), body_fat_pct=25.0, weight_kg=60.0)
-    await log_body_composition(db, user.id, date(2026, 3, 1), body_fat_pct=23.0, weight_kg=58.5)
+async def test_body_comp_history(db: AsyncSession, user: User, today: date):
+    older = today - timedelta(days=80)
+    newer = today - timedelta(days=20)
+    await log_body_composition(db, user.id, older, body_fat_pct=25.0, weight_kg=60.0)
+    await log_body_composition(db, user.id, newer, body_fat_pct=23.0, weight_kg=58.5)
     await db.flush()
 
     history = await get_body_composition_history(db, user.id, days=90)
     assert len(history) == 2
-    assert history[0]["date"] == "2026-03-01"
+    assert history[0]["date"] == newer.isoformat()
 
 
 async def test_body_comp_summary_with_change(db: AsyncSession, user: User, today: date):
@@ -48,9 +50,9 @@ async def test_body_comp_summary_with_change(db: AsyncSession, user: User, today
     assert summary["change"]["weight_kg"] == -2.0
 
 
-async def test_body_comp_summary_with_goal(db: AsyncSession, user: User):
+async def test_body_comp_summary_with_goal(db: AsyncSession, user: User, today: date):
     await update_profile(db, user.id, target_body_fat_pct=20.0)
-    await log_body_composition(db, user.id, date(2026, 3, 10), body_fat_pct=22.5)
+    await log_body_composition(db, user.id, today - timedelta(days=10), body_fat_pct=22.5)
     await db.flush()
 
     summary = await get_body_composition_summary(db, user.id, days=90)
@@ -58,11 +60,11 @@ async def test_body_comp_summary_with_goal(db: AsyncSession, user: User):
     assert summary["goals"]["gap"] == 2.5
 
 
-async def test_log_inbody_full(db: AsyncSession, user: User):
+async def test_log_inbody_full(db: AsyncSession, user: User, today: date):
     result = await log_body_composition(
         db,
         user.id,
-        date(2026, 3, 12),
+        today - timedelta(days=5),
         body_fat_pct=22.5,
         weight_kg=58.0,
         muscle_mass_kg=24.5,
