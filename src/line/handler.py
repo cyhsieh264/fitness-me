@@ -181,7 +181,19 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
         record_type = _infer_record_type(tool_calls)
         await save_raw_record(db, user_id, text, record_type)
 
-    # Turn 2: LLM generates final response from tool results
+    # Turn 2: LLM generates final response from tool results.
+    # Gemini 2.5 Flash reliably returns empty when given just
+    # `[tool_call, tool_result]` and expected to summarize implicitly —
+    # an explicit "please summarize" nudge dramatically reduces empty
+    # completions on this round-trip.
+    messages.append({
+        "role": "user",
+        "content": (
+            "請用繁體中文簡短摘要剛剛記錄的內容（1-3 行）。"
+            "若有 PR、目標達成、或值得提醒的觀察就一起講。"
+            "如果只是純資料記錄，回一句確認即可。"
+        ),
+    })
     try:
         response2 = await chat_completion(messages=messages)
     except (litellm.RateLimitError, litellm.AuthenticationError):
