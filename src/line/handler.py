@@ -45,7 +45,7 @@ SERVICE_PAUSED_MESSAGE = (
 
 # Used when the LLM returns no choices / empty content. Better than "..." —
 # gives the user something to react to instead of a dead-end.
-EMPTY_RESPONSE_MESSAGE = "嗯，我沒抓到你的意思，可以再講清楚一點嗎？"
+EMPTY_RESPONSE_MESSAGE = "AI 助手暫時不想說話，可以稍後再試一次。"
 
 DAILY_PUSH_CONTEXT = """
 
