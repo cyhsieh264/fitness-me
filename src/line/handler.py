@@ -49,64 +49,31 @@ EMPTY_RESPONSE_MESSAGE = "AI 助手暫時不想說話，可以稍後再試一次
 
 DAILY_PUSH_CONTEXT = """
 
-DAILY PUSH RESPONSE:
-The user is replying to today's morning push. They are stating their PLAN —
-they have not done the workout yet. Steps:
+DAILY PUSH REPLY:
+User is replying with TODAY'S PLAN (not completed work). Do these in order:
 
-1. Call update_daily_plan exactly once with their parsed intent:
-   - 自主練 / 健身 / 自己練 / 想練 → user_plan = "self_training"
-   - 教練 / 教練課 → user_plan = "coach"
-   - 休息 / 不練 / 休 → user_plan = "rest"
-   - 跑步 / 登山 / 騎車 / 游泳 / 其他運動 → user_plan = "other"
+1. Call update_daily_plan once. Hedged wording ("可能"/"應該"/"也許") still
+   maps to the closest plan — never freeze, always pick one:
+   self_training | coach | rest | other.
 
-   **Hedged wording maps to the closest plan, never freeze**:
-     "可能會自主練" / "應該會自己練" / "看狀況可能練" → self_training
-     "也許會去跑步" → other
-     "今天應該休息" → rest
-     即使使用者用「可能」「應該」「看心情」等不確定詞，**也要選一個 plan
-     繼續流程**，不要追問或返空。
+2. DO NOT call any logging tool (log_strength_training / log_cardio / ...).
+   The workout hasn't happened.
 
-2. **DO NOT** call log_strength_training, log_cardio, or any other
-   logging tool here. The user has NOT done the workout yet — they're
-   stating intent. Logging fires only when they later report completed
-   sets / reps / minutes.
+3. Reply in 繁體中文 based on plan:
 
-3. Based on user_plan, compose a reply in 繁體中文:
+   self_training → menu suggestion with these 5 lines:
+     🏋️ 重訓1 (全身複合): e.g. 深蹲 / 硬舉 / 引體 / 臥推
+     🏋️ 重訓2 (局部單關節): e.g. 二頭 / 側平舉 / 腿後彎舉
+     🚶 有氧 (具體機器+速度+坡度+時間): e.g. 跑步機 30min 速度4.5 坡度10
+     🔥 估熱量: cardio MET × latest_weight_kg
+     🥩 蛋白質: latest_weight_kg × N g/kg with N picked by context:
+        · 純休息 = 1.4 · 一般訓練 = 1.6 · 複合重訓 = 1.8
+        · 減脂目標 = 2.2 · 復健 condition = 1.8
+     選動作避開近 48h 練過的肌群，考慮 active conditions / goals.
 
-   user_plan = "self_training":
-     建議一套今天的菜單，**固定格式**：
-     - 🏋️ 重訓 1（複合 / 全身）：譬如深蹲、硬舉、引體向上、滑輪下拉、臥推
-     - 🏋️ 重訓 2（局部 / 單關節）：譬如二頭彎舉、三頭下壓、側平舉、腿後彎舉
-     - 🚶 有氧（明確機器 + 速度/坡度/時間）：
-         例「跑步機快走 30 分鐘，速度 4.5 km/h，坡度 10」
-     - 🔥 預估熱量消耗：用 cardio MET × USER PROFILE 的 latest_weight_kg
-         在 head 估算（譬如「跑步機快走 30min ≈ 200 大卡」）
-     - 🥩 蛋白質目標：依今天菜單 + 目標 + 身體狀況**動態算**，給一個
-         具體克數 + 一句為什麼。基準（每 kg 體重）：
-         · 一般日：1.4–1.6 g/kg
-         · 今天有複合重訓（深蹲/硬舉/臥推/划船）：1.6–2.0 g/kg
-         · 活躍目標含減脂 / 降體脂：2.0–2.4 g/kg（增加蛋白質保肌肉）
-         · 活躍 condition 有 injury / 復健中：1.6–2.0 g/kg（修復用）
-         · 純活動度日（散步、輕度有氧）：1.2–1.4 g/kg
-         範例輸出：「今天有複合重訓 + 減脂目標 → 蛋白質目標約 130g
-         (54kg × 2.4)，可以拆成早餐蛋白奶昔 ~30g、午餐雞胸 30g、
-         晚餐豆腐 + 蛋 ~40g、訓練後乳清 ~30g」
-
-     選動作時考慮：
-       • 近 7 天訓練過的肌群 → 避開 48 小時內練過的同肌群
-       • 活躍 user_conditions（譬如「左骨盆高」→ 避免單邊重壓；
-         「右臀無力」→ 多放單邊臀活化動作如 clamshell、單腿橋）
-       • 活躍目標（譬如深蹲突破 → 安排深蹲；體脂下降 → 重訓 volume
-         不減 + 有氧強度拉一點）
-
-   user_plan = "coach":
-     簡短鼓勵一句、提醒帶水暖身。**不要建議動作**（教練會安排）。
-
-   user_plan = "rest":
-     肯定休息也是訓練一部分，提醒輕度拉伸 / 補水 / 蛋白質仍要吃夠。
-
-   user_plan = "other"（跑步 / 登山 / 騎車 / 游泳 etc）:
-     簡短鼓勵 + 預估熱量（用對應 cardio MET 估）+ 提醒補水。
+   coach → 鼓勵 + 暖身提醒, 不建議動作.
+   rest → 肯定休息 + 拉伸/補水.
+   other → 鼓勵 + 估熱量.
 """
 
 configuration = Configuration(access_token=settings.line_channel_access_token)
