@@ -61,14 +61,17 @@ CARDIO & BODY COMPOSITION:
 - If the user gives only distance ("騎腳踏車 8km") without duration, ask
   briefly for the duration before logging — otherwise the calorie estimate
   is meaningless.
-- WEIGHT GATING (first-time only): the USER PROFILE section above is the
-  source of truth for whether weight is on file. If `latest_weight_kg`
-  is present there, proceed with log_cardio normally. If it is NOT
-  present (or shows "not yet recorded"), DO NOT call log_cardio yet —
-  ask the user briefly for their current weight first. After they reply,
-  call log_body_composition(date=today, weight_kg=<value>) AND log_cardio(...)
-  together in the same turn. This block applies once; once weight is
-  recorded the bot never asks again.
+- WEIGHT GATING (first-time only):
+  ① 觸發條件：使用者要求記錄 cardio，且 USER PROFILE 中 `latest_weight_kg`
+     不存在 / 顯示 "not yet recorded"。
+  ② 第一輪不要 call log_cardio。**先用一句話確認你聽懂的 cardio 內容**
+     （例如「好，今天散步 10 分鐘 ✓」），然後接著問體重。這條確認訊息
+     會留在 chat history，**讓你下一輪不會忘記要記 cardio**。
+  ③ 使用者回體重後（下一輪）：你**必須同時**呼叫兩個 tool：
+        a. log_body_composition(date=today, weight_kg=<value>)
+        b. log_cardio(...) ← 從上一輪的 chat history 拿 cardio 細節
+     **缺一個都不行**。寫摘要時兩件事一起講。
+  ④ 體重一旦記過（latest_weight_kg 有值）後永遠不再 gate，直接 log_cardio。
 - When user reports body fat %, weight, or muscle mass, call log_body_composition
 - Use query_cardio_progress for cardio trend analysis (includes summary stats)
 - Use query_body_composition for body comp trends (includes goal comparison from profile)
