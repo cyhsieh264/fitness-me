@@ -191,7 +191,23 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
         logger.exception("LLM turn 2 failed")
         return "Recorded, but failed to generate summary."
 
-    final_reply = response2.choices[0].message.content or "Done."
+    # Gemini 2.5 Flash intermittently returns no choices (or empty content)
+    # on the post-tool summary turn. Avoid IndexError and give the user a
+    # generic confirmation so at least the DB write isn't silent.
+    if not response2.choices:
+        logger.warning("LLM turn 2 returned no choices at all")
+        final_reply = "已記錄完成。"
+    else:
+        finish_reason_2 = getattr(response2.choices[0], "finish_reason", "?")
+        content_2 = response2.choices[0].message.content
+        if not content_2:
+            logger.warning(
+                "LLM turn 2 returned empty content (finish_reason=%s)",
+                finish_reason_2,
+            )
+            final_reply = "已記錄完成。"
+        else:
+            final_reply = content_2
 
     # Save bot suggestion if daily plan was updated
     if has_daily_plan:
