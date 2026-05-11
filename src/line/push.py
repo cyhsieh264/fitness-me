@@ -8,6 +8,7 @@ from src.db.database import async_session
 from src.db.models import DailyInteraction
 from src.line.handler import push_text
 from src.llm.client import chat_completion
+from src.services.chat_history import save_message
 from src.services.recommender import build_recommendation_context
 from src.services.user import get_user_by_line_id
 from src.utils.time import timestamp, today
@@ -52,12 +53,18 @@ async def send_daily_push(line_user_id: str) -> None:
             context = await build_recommendation_context(db, user.id)
             greeting = await _generate_greeting(context)
 
+            # Persist the push: both the daily_interactions audit row
+            # (push_sent_at + bot_suggestion) and the chat_messages
+            # entry so the LLM sees its own greeting when the user
+            # replies later in the day.
             interaction = DailyInteraction(
                 user_id=user.id,
                 date=today(),
                 push_sent_at=timestamp(),
+                bot_suggestion=greeting,
             )
             db.add(interaction)
+            await save_message(db, user.id, "assistant", greeting)
 
     await push_text(line_user_id, greeting)
     logger.info("Daily push sent to %s", line_user_id)
