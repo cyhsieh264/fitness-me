@@ -32,16 +32,14 @@ async def chat_completion(
                 tools=tools,
                 temperature=0.3,
                 timeout=TIMEOUT_SECONDS,
-                # Gemini 2.5 Flash thinking-mode tuning.
-                # - default (no flag): thinking burns the whole budget and the
-                #   response often comes back empty (finish_reason=stop).
-                # - reasoning_effort="disable": fixes empty output but the model
-                #   starts echoing previous assistant turns into the new reply,
-                #   apparently losing turn-discrimination without any thinking.
-                # - reasoning_effort="minimal": small thinking budget — enough
-                #   to keep turn context straight, not enough to starve output.
-                #   Empirically the right band for our 2-turn tool-call pattern.
-                reasoning_effort="minimal",
+                # Gemini 2.5 Flash thinking-mode tuning. Lower is faster but
+                # less reliable at turn discrimination; observations:
+                # - default (full): empty completions (thinking burns budget)
+                # - "disable":     echoes previous assistant turn
+                # - "minimal":     still echoes intermittently on simple Qs
+                # - "low":         current setting — empirically the smallest
+                #                  budget that keeps turn boundaries clean
+                reasoning_effort="low",
                 max_tokens=2048,
             )
             return response

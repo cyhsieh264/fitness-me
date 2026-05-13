@@ -6,7 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.models import ChatMessage
 from src.utils.time import days_ago_ts, timestamp, today_start_ts
 
-MAX_HISTORY_TURNS = 10
+# Reduced from 10 (20 messages) to 6 (12 messages). Gemini 2.5 Flash was
+# echoing older assistant turns into new replies when the history was long;
+# tighter context fits both Flash's stronger turn discrimination and our
+# pattern of short LINE-chat interactions.
+MAX_HISTORY_TURNS = 6
 
 
 async def get_recent_messages(
