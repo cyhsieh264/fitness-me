@@ -32,13 +32,16 @@ async def chat_completion(
                 tools=tools,
                 temperature=0.3,
                 timeout=TIMEOUT_SECONDS,
-                # Gemini 2.5 Flash defaults to "thinking" mode where part of
-                # the output token budget is spent on hidden reasoning. With a
-                # long system prompt + tool definitions this regularly leaves
-                # 0 tokens for the actual visible reply (finish_reason=stop,
-                # empty content). Disable thinking — for our 2-turn tool-call
-                # pattern we get faster, more reliable text replies.
-                reasoning_effort="disable",
+                # Gemini 2.5 Flash thinking-mode tuning.
+                # - default (no flag): thinking burns the whole budget and the
+                #   response often comes back empty (finish_reason=stop).
+                # - reasoning_effort="disable": fixes empty output but the model
+                #   starts echoing previous assistant turns into the new reply,
+                #   apparently losing turn-discrimination without any thinking.
+                # - reasoning_effort="minimal": small thinking budget — enough
+                #   to keep turn context straight, not enough to starve output.
+                #   Empirically the right band for our 2-turn tool-call pattern.
+                reasoning_effort="minimal",
                 max_tokens=2048,
             )
             return response
