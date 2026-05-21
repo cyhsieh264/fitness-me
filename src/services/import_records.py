@@ -108,7 +108,7 @@ async def import_block(db, user_id: int, training_date: date, block_text: str) -
 
     for tc in message.tool_calls:
         args = json.loads(tc.function.arguments)
-        if tc.function.name == "log_strength_training":
+        if tc.function.name in ("log_strength_training", "log_user_condition"):
             args["date"] = training_date.isoformat()
 
         result = await execute_tool(db, user_id, tc.function.name, args)
@@ -151,7 +151,10 @@ async def run_import(
                 )
                 existing = {row for row in result.scalars().all()}
 
-    new_blocks = [(d, b) for d, b in blocks if d not in existing]
+    new_blocks = sorted(
+        ((d, b) for d, b in blocks if d not in existing),
+        key=lambda pair: pair[0],
+    )
     already_existed = len(blocks) - len(new_blocks)
     if already_existed:
         logger.info("Skipping %d blocks whose date already has a session", already_existed)

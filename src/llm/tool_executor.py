@@ -17,7 +17,7 @@ from src.services import (
     recommender,
     workout,
 )
-from src.utils.time import today
+from src.utils.time import date_to_ts, today
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,9 @@ async def _log_strength_training(db: AsyncSession, user_id: int, args: dict) -> 
     if args.get("session_notes"):
         session.notes = args["session_notes"]
 
-    results = await workout.record_exercises(db, user_id, session.id, args.get("exercises", []))
+    results = await workout.record_exercises(
+        db, user_id, session.id, args.get("exercises", []), training_date=training_date
+    )
 
     return {
         "session_id": session.id,
@@ -78,6 +80,10 @@ async def _log_user_condition(db: AsyncSession, user_id: int, args: dict) -> dic
             exercise_id = exercise.id
             exercise_display = exercise.name_zh
 
+    observed_at = None
+    if args.get("date"):
+        observed_at = date_to_ts(date.fromisoformat(args["date"]))
+
     cond = await condition.add_condition(
         db,
         user_id=user_id,
@@ -85,6 +91,7 @@ async def _log_user_condition(db: AsyncSession, user_id: int, args: dict) -> dic
         description=args["description"],
         action_item=args.get("action_item"),
         exercise_id=exercise_id,
+        observed_at=observed_at,
     )
     result: dict = {"condition_id": cond.id, "status": "recorded"}
     if exercise_display:

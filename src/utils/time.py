@@ -47,7 +47,12 @@ def to_datetime(ts: int | None) -> datetime | None:
 
 def today_start_ts() -> int:
     """Unix timestamp for the start of today in configured timezone."""
-    midnight = datetime.combine(today(), datetime.min.time(), tzinfo=_tz())
+    return date_to_ts(today())
+
+
+def date_to_ts(d: date) -> int:
+    """Unix timestamp for midnight of the given date in configured timezone."""
+    midnight = datetime.combine(d, datetime.min.time(), tzinfo=_tz())
     return int(midnight.timestamp())
 
 

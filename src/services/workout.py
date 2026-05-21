@@ -77,6 +77,7 @@ async def record_exercises(
     user_id: int,
     session_id: int,
     exercises_data: list[dict],
+    training_date: date | None = None,
 ) -> list[dict]:
     """Record exercises + sets. Returns list with resolved names and PR info."""
     results = []
@@ -122,6 +123,7 @@ async def record_exercises(
                     set_data["weight_value"],
                     set_data.get("weight_type", "total"),
                     set_data.get("weight_unit", "kg"),
+                    training_date=training_date,
                 )
                 if pr and (best_pr is None or pr["total_kg"] > best_pr["total_kg"]):
                     best_pr = pr
@@ -162,7 +164,9 @@ async def _check_pr(
     weight_value: float,
     weight_type: str,
     weight_unit: str,
+    training_date: date | None = None,
 ) -> dict | None:
+    achieved_on = training_date or today()
     total_kg = _normalize_weight_kg(weight_value, weight_type, weight_unit)
     if total_kg is None:
         return None
@@ -196,7 +200,7 @@ async def _check_pr(
     if current_pr:
         current_pr.best_weight_kg = total_kg
         current_pr.weight_display = display
-        current_pr.achieved_date = today()
+        current_pr.achieved_date = achieved_on
         current_pr.next_target_kg = next_target
     else:
         db.add(
@@ -205,7 +209,7 @@ async def _check_pr(
                 exercise_id=exercise.id,
                 best_weight_kg=total_kg,
                 weight_display=display,
-                achieved_date=today(),
+                achieved_date=achieved_on,
                 next_target_kg=next_target,
             )
         )

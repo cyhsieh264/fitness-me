@@ -13,6 +13,7 @@ async def add_condition(
     action_item: str | None = None,
     exercise_id: int | None = None,
     source_session_id: int | None = None,
+    observed_at: int | None = None,
 ) -> UserCondition:
     condition = UserCondition(
         user_id=user_id,
@@ -21,7 +22,7 @@ async def add_condition(
         action_item=action_item,
         exercise_id=exercise_id,
         source_session_id=source_session_id,
-        created_at=timestamp(),
+        created_at=observed_at if observed_at is not None else timestamp(),
     )
     db.add(condition)
     await db.flush()
