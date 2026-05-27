@@ -17,8 +17,9 @@ from src.services.import_records import run_import
 from src.services.scheduler import check_and_send_missed_push, start_scheduler, stop_scheduler
 from src.storage import get_storage
 from src.storage.local import LocalStorage
+from src.utils.logging import align_uvicorn_loggers, setup_logging
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Fitness-Me LINE Bot")
@@ -27,6 +28,9 @@ parser = WebhookParser(settings.line_channel_secret)
 
 @app.on_event("startup")
 async def startup() -> None:
+    # uvicorn configures its own logging before the app starts; re-route its
+    # loggers through our root handler now so every line shares one format.
+    align_uvicorn_loggers()
     # run_seed() creates tables and idempotently inserts the exercise/muscle
     # dictionary. Safe to run on every boot — no-ops once the data is there.
     await run_seed()
