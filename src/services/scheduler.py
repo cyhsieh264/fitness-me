@@ -102,17 +102,28 @@ async def check_and_send_missed_push() -> None:
 
 def start_scheduler() -> None:
     """Start the scheduler with daily push and cleanup jobs."""
+    # misfire_grace_time defaults to 1s: if the event loop is busy when the
+    # trigger fires, APScheduler silently drops the run. The push already
+    # tolerates up to an hour of jitter, so accept the same lateness window
+    # rather than lose a whole morning. coalesce collapses any backlog into a
+    # single run.
     scheduler.add_job(
         _daily_push_job,
         CronTrigger(hour=8, minute=0, jitter=3600, timezone=settings.timezone),
         id="daily_push",
         replace_existing=True,
+        misfire_grace_time=3600,
+        coalesce=True,
     )
+    # Cleanup keys off today(); keep the grace tight so a misfire still runs
+    # within the same calendar day.
     scheduler.add_job(
         _cleanup_job,
         CronTrigger(hour=23, minute=59, timezone=settings.timezone),
         id="daily_cleanup",
         replace_existing=True,
+        misfire_grace_time=300,
+        coalesce=True,
     )
     scheduler.start()
     logger.info("Scheduler started: daily_push (08:00+jitter), daily_cleanup (23:59)")
