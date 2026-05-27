@@ -8,13 +8,27 @@ litellm.drop_params = True
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 2
+MAX_RETRIES = 3
 TIMEOUT_SECONDS = 30
 
 # Errors we should NOT retry on. Retrying just burns more quota or repeats
 # a known-bad credential. We re-raise so callers can surface a friendly
 # "service paused" reply.
 NON_RETRYABLE = (litellm.RateLimitError, litellm.AuthenticationError)
+
+
+def _is_usable(response: litellm.ModelResponse) -> bool:
+    """Whether the response carries something a caller can act on.
+
+    Gemini 2.5 Flash intermittently returns finish_reason=stop with neither
+    text content nor tool calls. Such a response is dead weight — callers can
+    only fall back to a canned message — so we treat it as retryable and
+    re-sample (temperature=0.3 makes a fresh draw likely to differ).
+    """
+    if not response.choices:
+        return False
+    message = response.choices[0].message
+    return bool(message.content or message.tool_calls)
 
 
 async def chat_completion(
@@ -42,7 +56,6 @@ async def chat_completion(
                 reasoning_effort="low",
                 max_tokens=2048,
             )
-            return response
         except NON_RETRYABLE:
             # Quota / auth — propagate immediately, do not retry.
             raise
@@ -52,5 +65,17 @@ async def chat_completion(
                 logger.warning("LLM call attempt %d failed: %s, retrying...", attempt, e)
             else:
                 logger.error("LLM call failed after %d attempts: %s", MAX_RETRIES, e)
+            continue
+
+        # Re-sample empty responses while attempts remain; on the final
+        # attempt hand the empty response back so the caller's fallback
+        # message still kicks in rather than raising.
+        if _is_usable(response) or attempt == MAX_RETRIES:
+            return response
+        logger.warning(
+            "LLM returned unusable (empty) response, re-sampling (attempt %d/%d)",
+            attempt,
+            MAX_RETRIES,
+        )
 
     raise last_error  # type: ignore[misc]
