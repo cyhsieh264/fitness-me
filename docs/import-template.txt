@@ -1,9 +1,15 @@
 # Fitness-Me historical-import template
 #
 # Strict rule: every workout block STARTS with a date on its own line in the
-# format YYYY/MM/DD. Anything between two dates belongs to the earlier date.
-# Blank lines are ignored. Comments are not supported by the parser — strip
-# them before uploading.
+# format YYYY/MM/DD, optionally followed by a session-type tag:
+#   2025/05/12 (self)    -> self-training (自主訓練)
+#   2025/05/14 (coach)   -> coach class (教練課)
+#   2025/05/16 (other)   -> other (球類、團課等)
+#   2025/05/18           -> no tag, defaults to "self_training"
+#
+# The tag applies to the WHOLE block until the next date line. Anything
+# between two dates belongs to the earlier date. Blank lines are ignored.
+# Comments are not supported by the parser — strip them before uploading.
 #
 # Submit via:
 #   curl -X POST https://<host>/admin/import-history \
@@ -14,14 +20,14 @@
 # The LLM interprets the body of each block. The conventions below mirror what
 # the import prompt is taught — sticking to them maximises parse success.
 
-2025/05/12
+2025/05/12 (self)
 槓鈴深蹲 40kg*10*4
 RDL 35kg*10*3
 保加利亞分腿蹲 8kg each*10*3
 平板 30sec*3
 左骨盆較高，下次注意活化右臀
 
-2025/05/14
+2025/05/14 (coach)
 臥推 練習槓+5kg each*8*3
 滑輪下拉 35kg*10*3
 單臂啞鈴划船 12kg each*10*3

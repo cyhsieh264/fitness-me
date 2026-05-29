@@ -18,7 +18,17 @@ from src.services.workout import save_raw_record
 
 logger = logging.getLogger(__name__)
 
-DATE_RE = re.compile(r"^(\d{4})/(\d{2})/(\d{2})$")
+# Optional `(self)` / `(coach)` / `(other)` tag right after the date.
+# No tag -> DEFAULT_SESSION_TYPE.
+DATE_RE = re.compile(
+    r"^(\d{4})/(\d{2})/(\d{2})(?:\s+\((self|coach|other)\))?\s*$"
+)
+DEFAULT_SESSION_TYPE = "self_training"
+_TAG_TO_SESSION_TYPE = {
+    "self": "self_training",
+    "coach": "coach",
+    "other": "other",
+}
 
 IMPORT_SYSTEM_PROMPT = """\
 You are importing historical workout records into a database.
@@ -27,8 +37,9 @@ Parse the workout text and call the appropriate tools.
 Rules:
 - Use log_strength_training for exercise data
 - Use log_user_condition for body condition/posture/weakness observations
-- The date is given in the prompt. Always use it in the tool call.
-- All sessions are type "coach" (personal training records)
+- The date AND session_type are given in the prompt. Always use both in the
+  log_strength_training tool call exactly as provided — do NOT infer
+  session_type from the workout content.
 - "空" = bodyweight (omit weight_value, set weight_type to "bodyweight")
 - "each" = weight_type "per_side"
 - "練習槓" = empty standard barbell (~20kg total). "練習槓+Nkg each" = 20 + N*2 total
@@ -53,10 +64,16 @@ LLM_RATE_LIMIT_SEC = 4
 def parse_date_blocks(
     text: str,
     cutoff_years: int = DEFAULT_CUTOFF_YEARS,
-) -> list[tuple[date, str]]:
+) -> list[tuple[date, str, str]]:
+    """Split text into (date, body, session_type) tuples.
+
+    Each block starts with `YYYY/MM/DD` optionally followed by
+    `(self|coach|other)`. Missing tag falls back to DEFAULT_SESSION_TYPE.
+    """
     cutoff = date.today() - timedelta(days=cutoff_years * 365)
-    blocks = []
-    current_date = None
+    blocks: list[tuple[date, str, str]] = []
+    current_date: date | None = None
+    current_session_type: str = DEFAULT_SESSION_TYPE
     current_lines: list[str] = []
 
     for line in text.strip().split("\n"):
@@ -64,17 +81,23 @@ def parse_date_blocks(
         m = DATE_RE.match(line)
         if m:
             if current_date and current_lines:
-                blocks.append((current_date, "\n".join(current_lines)))
+                blocks.append(
+                    (current_date, "\n".join(current_lines), current_session_type)
+                )
             current_date = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            tag = m.group(4)
+            current_session_type = (
+                _TAG_TO_SESSION_TYPE[tag] if tag else DEFAULT_SESSION_TYPE
+            )
             current_lines = []
         elif line:
             current_lines.append(line)
 
     if current_date and current_lines:
-        blocks.append((current_date, "\n".join(current_lines)))
+        blocks.append((current_date, "\n".join(current_lines), current_session_type))
 
     # Filter by cutoff
-    filtered = [(d, b) for d, b in blocks if d >= cutoff]
+    filtered = [(d, b, st) for d, b, st in blocks if d >= cutoff]
     if len(filtered) < len(blocks):
         logger.info(
             "Filtered out %d blocks older than %s",
@@ -83,8 +106,18 @@ def parse_date_blocks(
     return filtered
 
 
-async def import_block(db, user_id: int, training_date: date, block_text: str) -> bool:
-    prompt = f"Date: {training_date.isoformat()}\n\nWorkout record:\n{block_text}"
+async def import_block(
+    db,
+    user_id: int,
+    training_date: date,
+    block_text: str,
+    session_type: str = DEFAULT_SESSION_TYPE,
+) -> bool:
+    prompt = (
+        f"Date: {training_date.isoformat()}\n"
+        f"session_type: {session_type}\n\n"
+        f"Workout record:\n{block_text}"
+    )
 
     messages = [
         {"role": "system", "content": IMPORT_SYSTEM_PROMPT},
@@ -110,6 +143,10 @@ async def import_block(db, user_id: int, training_date: date, block_text: str) -
         args = json.loads(tc.function.arguments)
         if tc.function.name in ("log_strength_training", "log_user_condition"):
             args["date"] = training_date.isoformat()
+        # Force the import-side session_type onto strength logs so the LLM
+        # can't quietly downgrade an "教練課" block to "self_training".
+        if tc.function.name == "log_strength_training":
+            args["session_type"] = session_type
 
         result = await execute_tool(db, user_id, tc.function.name, args)
         logger.info("  %s -> %s", tc.function.name, result[:200])
@@ -140,7 +177,7 @@ async def run_import(
             user = await get_or_create_user(db, line_user_id)
             user_id = user.id
 
-            block_dates = [d for d, _ in blocks]
+            block_dates = [d for d, _, _ in blocks]
             existing = set()
             if block_dates:
                 result = await db.execute(
@@ -152,20 +189,22 @@ async def run_import(
                 existing = {row for row in result.scalars().all()}
 
     new_blocks = sorted(
-        ((d, b) for d, b in blocks if d not in existing),
-        key=lambda pair: pair[0],
+        ((d, b, st) for d, b, st in blocks if d not in existing),
+        key=lambda triple: triple[0],
     )
     already_existed = len(blocks) - len(new_blocks)
     if already_existed:
         logger.info("Skipping %d blocks whose date already has a session", already_existed)
 
     success = 0
-    for i, (d, block) in enumerate(new_blocks):
-        logger.info("[%d/%d] Importing %s ...", i + 1, len(new_blocks), d)
+    for i, (d, block, session_type) in enumerate(new_blocks):
+        logger.info(
+            "[%d/%d] Importing %s (%s) ...", i + 1, len(new_blocks), d, session_type
+        )
 
         async with async_session() as db:
             async with db.begin():
-                ok = await import_block(db, user_id, d, block)
+                ok = await import_block(db, user_id, d, block, session_type)
                 if ok:
                     success += 1
 
