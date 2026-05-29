@@ -22,7 +22,7 @@ from src.auth.whitelist import is_user_allowed
 from src.config import settings
 from src.db.database import async_session
 from src.llm.client import chat_completion
-from src.llm.prompts import SYSTEM_PROMPT
+from src.llm.prompts import PromptContext, build_system_prompt
 from src.llm.tool_executor import execute_tool
 from src.llm.tools import TOOLS
 from src.llm.vision import classify_and_parse_image
@@ -30,9 +30,14 @@ from src.services.chat_history import get_recent_messages, save_message
 from src.services.goals import get_active_goals
 from src.services.images import save_image
 from src.services.profile import get_profile_summary
-from src.services.recommender import get_pending_daily_interaction, save_bot_suggestion
+from src.services.recommender import (
+    get_pending_daily_interaction,
+    save_bot_suggestion,
+    update_daily_plan,
+)
 from src.services.user import get_or_create_user
 from src.services.workout import save_raw_record
+from src.utils.time import today
 
 logger = logging.getLogger(__name__)
 
@@ -47,34 +52,88 @@ SERVICE_PAUSED_MESSAGE = (
 # gives the user something to react to instead of a dead-end.
 EMPTY_RESPONSE_MESSAGE = "AI 助手暫時不想說話，可以稍後再試一次。"
 
-DAILY_PUSH_CONTEXT = """
+# Turn-2 prompts. Writes get a terse confirmation; queries must list every
+# row the tool returned — gating on user push-back is what got us into the
+# "drip-fed" mess in spec-004.
+TURN2_PROMPT_WRITE = (
+    "請用繁體中文簡短摘要剛剛記錄的內容（1-3 行）。"
+    "若有 PR、目標達成、或值得提醒的觀察就一起講。"
+    "如果只是純資料記錄，回一句確認即可。"
+)
 
-DAILY PUSH REPLY:
-User is replying with TODAY'S PLAN (not completed work). Do these in order:
+TURN2_PROMPT_QUERY = (
+    "請用繁體中文，依工具回傳的資料完整作答：\n"
+    "- 每一筆都列出來，含動作名、重量/組數、日期、以及 session_type "
+    "（self_training→自主訓練 / coach→教練課 / other→其他）。\n"
+    "- 不要刪節為「最高 N 公斤」這種單行摘要，除非使用者只問最高。\n"
+    "- 同類動作有多筆時全部列出，按動作分組。\n"
+    "- 工具沒回的紀錄絕對不要編造。找不到就說找不到，並建議用更廣的關鍵詞 "
+    "或 muscle_group 再查一次。"
+)
 
-1. Call update_daily_plan once. Hedged wording ("可能"/"應該"/"也許") still
-   maps to the closest plan — never freeze, always pick one:
-   self_training | coach | rest | other.
+# Bot-side insurance for daily-push replies: when the LLM returns silence
+# (empty content + no tool calls) AND a daily push is pending, we run this
+# tiny keyword classifier ourselves so the user is never met with the canned
+# EMPTY_RESPONSE_MESSAGE on their morning reply. Ordering matters — first
+# match wins. Lowercased before comparison.
+_DAILY_PUSH_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("rest", ("休息", "沒練", "不練", "不想練", "rest", "off", "痠痛", "酸痛")),
+    ("coach", ("教練", "pt ", " pt", "上課")),
+    ("self_training", ("自己練", "自主", "自己", "solo")),
+]
 
-2. DO NOT call any logging tool (log_strength_training / log_cardio / ...).
-   The workout hasn't happened.
+_DAILY_PUSH_FALLBACK_REPLY = {
+    "rest": "好喔，今天休息！記得伸展放鬆，多補水 💧",
+    "coach": "好的，教練課加油！上課前先做好暖身 🔥",
+    "self_training": "好喔，自主訓練！動作品質第一，避開近兩天練過的肌群。",
+    "other": "好喔，記得多喝水、保持心情愉快！",
+}
 
-3. Reply in 繁體中文 based on plan:
 
-   self_training → menu suggestion with these 5 lines:
-     🏋️ 重訓1 (全身複合): e.g. 深蹲 / 硬舉 / 引體 / 臥推
-     🏋️ 重訓2 (局部單關節): e.g. 二頭 / 側平舉 / 腿後彎舉
-     🚶 有氧 (具體機器+速度+坡度+時間): e.g. 跑步機 30min 速度4.5 坡度10
-     🔥 估熱量: cardio MET × latest_weight_kg
-     🥩 蛋白質: latest_weight_kg × N g/kg with N picked by context:
-        · 純休息 = 1.4 · 一般訓練 = 1.6 · 複合重訓 = 1.8
-        · 減脂目標 = 2.2 · 復健 condition = 1.8
-     選動作避開近 48h 練過的肌群，考慮 active conditions / goals.
+def _classify_daily_push(text: str) -> str:
+    """Map a free-text daily-push reply to one of the four plans.
 
-   coach → 鼓勵 + 暖身提醒, 不建議動作.
-   rest → 肯定休息 + 拉伸/補水.
-   other → 鼓勵 + 估熱量.
-"""
+    Used only as a fallback when the LLM produces nothing — see the
+    `_process_with_llm` empty-response branches. "other" is the catch-all so
+    we always have something to call update_daily_plan with.
+    """
+    needle = text.lower()
+    for plan, keywords in _DAILY_PUSH_KEYWORDS:
+        if any(kw in needle for kw in keywords):
+            return plan
+    return "other"
+
+
+async def _empty_response_fallback(
+    db: AsyncSession,
+    user_id: int,
+    text: str,
+    has_pending_daily_push: bool,
+) -> str:
+    """Pick the best fallback reply when the LLM produced nothing.
+
+    Daily-push branch: classify by keyword, record the plan via
+    update_daily_plan, and reply with a stock zh-TW line for that plan.
+    Anywhere else: fall back to EMPTY_RESPONSE_MESSAGE — there's no signal
+    to act on.
+    """
+    if not has_pending_daily_push:
+        return EMPTY_RESPONSE_MESSAGE
+
+    plan = _classify_daily_push(text)
+    try:
+        await update_daily_plan(db, user_id, plan, text)
+    except Exception:
+        logger.exception("Daily-plan fallback update failed (plan=%s)", plan)
+        # Don't bail — still give the user a coherent reply even if the
+        # bookkeeping write failed; they can re-state later.
+    reply = _DAILY_PUSH_FALLBACK_REPLY[plan]
+    try:
+        await save_bot_suggestion(db, user_id, reply)
+    except Exception:
+        logger.exception("save_bot_suggestion failed in fallback")
+    return reply
+
 
 configuration = Configuration(access_token=settings.line_channel_access_token)
 
@@ -99,40 +158,35 @@ async def handle_text_message(event: MessageEvent) -> None:
     await _send_reply(line_user_id, reply_token, reply, start)
 
 
-async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
-    system_prompt = SYSTEM_PROMPT
+async def _process_with_llm(
+    db: AsyncSession,
+    user_id: int,
+    text: str,
+    *,
+    image_category: str | None = None,
+) -> str:
+    """Run a single LLM turn (text or image-synthetic).
 
-    # Inject user profile into system prompt. latest_weight_kg is special-
-    # cased so the LLM sees an explicit "not yet recorded" — the absence of
-    # a key would be ambiguous.
+    image_category is the vision-classifier label when this turn was triggered
+    by a photo, so the prompt assembler can include image-specific sections
+    (INBODY_REPORTS, IMAGE_EXTRACTION) only when relevant.
+    """
     profile = await get_profile_summary(db, user_id)
-    profile_parts: list[str] = []
-    for key, value in profile.items():
-        if key == "latest_weight_kg":
-            profile_parts.append(
-                f"- latest_weight_kg: {value}" if value else "- latest_weight_kg: not yet recorded"
-            )
-        elif value is not None:
-            profile_parts.append(f"- {key}: {value}")
-    system_prompt += "\n\nUSER PROFILE:\n" + "\n".join(profile_parts)
-
-    # Inject active goals into system prompt
     active_goals = await get_active_goals(db, user_id)
-    if active_goals:
-        goal_lines = []
-        for g in active_goals:
-            line = f"- [id={g['id']}] ({g['category']}) {g['description']}"
-            if g.get("target_value"):
-                line += f" target={g['target_value']}{g.get('target_unit', '')}"
-            goal_lines.append(line)
-        system_prompt += "\n\nACTIVE GOALS:\n" + "\n".join(goal_lines)
-
-    # Check for pending daily push interaction
     pending = await get_pending_daily_interaction(db, user_id)
-    if pending:
-        system_prompt += DAILY_PUSH_CONTEXT
+    has_pending_daily_push = pending is not None
 
-    # Build messages with chat history
+    ctx = PromptContext(
+        today_iso=today().isoformat(),
+        timezone=settings.timezone,
+        profile_summary=profile,
+        active_goals=active_goals,
+        has_pending_daily_push=has_pending_daily_push,
+        image_in_flight=image_category,
+        latest_weight_recorded=bool(profile.get("latest_weight_kg")),
+    )
+    system_prompt = build_system_prompt(ctx)
+
     history = await get_recent_messages(db, user_id)
     messages: list[dict] = [{"role": "system", "content": system_prompt}]  # type: ignore[type-arg]
     messages.extend(history)
@@ -150,7 +204,7 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
     # Same defensive guard as turn 2 — Gemini may return empty choices.
     if not response.choices:
         logger.warning("LLM turn 1 returned no choices at all for text=%r", text[:200])
-        reply = EMPTY_RESPONSE_MESSAGE
+        reply = await _empty_response_fallback(db, user_id, text, has_pending_daily_push)
         await save_message(db, user_id, "user", text)
         await save_message(db, user_id, "assistant", reply)
         return reply
@@ -167,7 +221,9 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
                 finish_reason,
                 text[:200],
             )
-            reply = EMPTY_RESPONSE_MESSAGE
+            reply = await _empty_response_fallback(
+                db, user_id, text, has_pending_daily_push
+            )
         else:
             reply = message.content
         await save_message(db, user_id, "user", text)
@@ -178,6 +234,7 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
     messages.append(message.model_dump())
 
     has_db_write = False
+    has_query = False
     has_daily_plan = False
     for tc in tool_calls:
         try:
@@ -201,6 +258,8 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
 
         if tool_name.startswith(("log_", "update_", "resolve_", "manage_goal")):
             has_db_write = True
+        if tool_name.startswith("query_"):
+            has_query = True
         if tool_name == "update_daily_plan":
             has_daily_plan = True
 
@@ -214,14 +273,14 @@ async def _process_with_llm(db: AsyncSession, user_id: int, text: str) -> str:
     # `[tool_call, tool_result]` and expected to summarize implicitly —
     # an explicit "please summarize" nudge dramatically reduces empty
     # completions on this round-trip.
-    messages.append({
-        "role": "user",
-        "content": (
-            "請用繁體中文簡短摘要剛剛記錄的內容（1-3 行）。"
-            "若有 PR、目標達成、或值得提醒的觀察就一起講。"
-            "如果只是純資料記錄，回一句確認即可。"
-        ),
-    })
+    #
+    # Branch on tool type: writes get a terse confirmation; pure queries get
+    # the "list every row" prompt (spec-004 fix for drip-fed answers).
+    if has_query and not has_db_write:
+        turn2_content = TURN2_PROMPT_QUERY
+    else:
+        turn2_content = TURN2_PROMPT_WRITE
+    messages.append({"role": "user", "content": turn2_content})
     try:
         response2 = await chat_completion(messages=messages)
     except (litellm.RateLimitError, litellm.AuthenticationError):
@@ -423,7 +482,9 @@ async def handle_image_message(event: MessageEvent) -> None:
                     f"any introducer text in the recent chat history before replying."
                 )
 
-            reply = await _process_with_llm(db, user.id, synthetic)
+            reply = await _process_with_llm(
+                db, user.id, synthetic, image_category=category
+            )
 
     await _send_reply(line_user_id, reply_token, reply, start)
 

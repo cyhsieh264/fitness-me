@@ -8,8 +8,20 @@ litellm.drop_params = True
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 3
 TIMEOUT_SECONDS = 30
+
+# Per-attempt parameter overrides. Identical retries with the same
+# reasoning budget tend to hit the same Gemini 2.5 Flash failure mode
+# (finish_reason=stop with empty content because thinking burns the
+# budget before any output is emitted). Stepping the budget down on each
+# retry trades reasoning quality for "actually returns something".
+# Attempt-3 also caps max_tokens to discourage runaway thinking.
+ATTEMPT_OVERRIDES: list[dict] = [  # type: ignore[type-arg]
+    {"reasoning_effort": "low",     "max_tokens": 2048},  # attempt 1
+    {"reasoning_effort": "minimal", "max_tokens": 2048},  # attempt 2
+    {"reasoning_effort": "disable", "max_tokens": 1024},  # attempt 3
+]
+MAX_RETRIES = len(ATTEMPT_OVERRIDES)
 
 # Errors we should NOT retry on. Retrying just burns more quota or repeats
 # a known-bad credential. We re-raise so callers can surface a friendly
@@ -22,8 +34,7 @@ def _is_usable(response: litellm.ModelResponse) -> bool:
 
     Gemini 2.5 Flash intermittently returns finish_reason=stop with neither
     text content nor tool calls. Such a response is dead weight — callers can
-    only fall back to a canned message — so we treat it as retryable and
-    re-sample (temperature=0.3 makes a fresh draw likely to differ).
+    only fall back to a canned message — so we treat it as retryable.
     """
     if not response.choices:
         return False
@@ -37,7 +48,7 @@ async def chat_completion(
 ) -> litellm.ModelResponse:
     last_error: Exception | None = None
 
-    for attempt in range(1, MAX_RETRIES + 1):
+    for attempt, overrides in enumerate(ATTEMPT_OVERRIDES, start=1):
         try:
             response: litellm.ModelResponse = await litellm.acompletion(
                 model=settings.llm_model,
@@ -46,15 +57,7 @@ async def chat_completion(
                 tools=tools,
                 temperature=0.3,
                 timeout=TIMEOUT_SECONDS,
-                # Gemini 2.5 Flash thinking-mode tuning. Lower is faster but
-                # less reliable at turn discrimination; observations:
-                # - default (full): empty completions (thinking burns budget)
-                # - "disable":     echoes previous assistant turn
-                # - "minimal":     still echoes intermittently on simple Qs
-                # - "low":         current setting — empirically the smallest
-                #                  budget that keeps turn boundaries clean
-                reasoning_effort="low",
-                max_tokens=2048,
+                **overrides,
             )
         except NON_RETRYABLE:
             # Quota / auth — propagate immediately, do not retry.
@@ -73,9 +76,11 @@ async def chat_completion(
         if _is_usable(response) or attempt == MAX_RETRIES:
             return response
         logger.warning(
-            "LLM returned unusable (empty) response, re-sampling (attempt %d/%d)",
+            "LLM returned unusable (empty) response on attempt %d/%d "
+            "(effort=%s) — retrying with stepped-down params",
             attempt,
             MAX_RETRIES,
+            overrides.get("reasoning_effort"),
         )
 
     raise last_error  # type: ignore[misc]

@@ -83,3 +83,24 @@ async def test_non_retryable_propagates_immediately(monkeypatch):
     with pytest.raises(client.litellm.AuthenticationError):
         await client.chat_completion(messages=[{"role": "user", "content": "hi"}])
     assert state["n"] == 1
+
+
+async def test_retry_escalates_reasoning_effort(monkeypatch):
+    """Each attempt steps reasoning_effort down: low -> minimal -> disable.
+
+    Lock the sequence in so a casual edit to ATTEMPT_OVERRIDES that breaks
+    the escalation contract fails this test rather than silently shipping.
+    """
+    seen_efforts: list[str] = []
+    seen_max_tokens: list[int] = []
+
+    async def fake_acompletion(**kwargs):
+        seen_efforts.append(kwargs.get("reasoning_effort"))
+        seen_max_tokens.append(kwargs.get("max_tokens"))
+        return _resp()  # always empty, forces all 3 attempts
+
+    monkeypatch.setattr(client.litellm, "acompletion", fake_acompletion)
+    await client.chat_completion(messages=[{"role": "user", "content": "hi"}])
+
+    assert seen_efforts == ["low", "minimal", "disable"]
+    assert seen_max_tokens == [2048, 2048, 1024]
