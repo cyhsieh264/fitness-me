@@ -123,6 +123,18 @@ def test_active_goals_section_only_when_goals_present():
     assert "[id=7] (strength) 深蹲 60kg target=60.0kg" in text
 
 
+def test_exercise_queries_section_teaches_autonomous_retry():
+    """Spec-004: when first query returns empty, LLM should try alternative
+    keywords / muscle_group / pattern itself, not give up and ask the user
+    to enumerate exercise names."""
+    text = build_system_prompt(_base_ctx())
+    # The key phrases that drive the autonomous-retry behaviour.
+    assert "不可以馬上回「找不到」" in text or "不要馬上回「找不到」" in text
+    assert "不要反問使用者該用什麼名稱" in text
+    assert "同義詞" in text
+    assert "拆關鍵詞" in text
+
+
 def test_conditional_savings_vs_full_context():
     """The "everything-on" prompt should be substantially larger than the
     "everything-off" baseline. Spec target was ~2k chars saved on a typical

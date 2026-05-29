@@ -289,7 +289,22 @@ EXERCISE QUERIES (PR / progression / catalog):
 - 列出工具回的每一筆：動作名、重量/組數、日期、session_type
   (self_training→自主訓練 / coach→教練課). 不要刪節為「最高 N 公斤」，
   除非使用者只問最高。同類動作有多筆時，全部列出按動作分組。
-- 工具沒回的不要編造；找不到就直說，並建議用更廣的關鍵詞或 muscle_group 重查。"""
+- **第一次 query 空集合時不可以馬上回「找不到」**；先在同一輪內自己換 2-3 種
+  關鍵詞重試，再判斷是否真的沒有：
+    a. 同義詞 / 別名：「鳥狗」→ 試 "bird dog"; 「滑輪下拉」→ 試「lat pulldown」
+       /「lat」; 「肩推」→ 試「shoulder press」/「OHP」。
+    b. 拆關鍵詞：「保加利亞分腿蹲」→ 試「分腿蹲」/「split」;
+       「Cable三頭過頭屈伸」→ 試「過頭」/「三頭」。
+    c. 改成 muscle_group：「鳥狗」可能是核心 → muscle_group="核心";
+       「腿後勾」→ muscle_group="膕繩肌"/"hamstring"。
+    d. 改成 movement_pattern (query_exercise_catalog 才有)：硬舉系列 →
+       movement_pattern="hinge"; 引體 / 划船 → "horizontal_pull" / "vertical_pull"。
+    e. 用 query_exercise_catalog 列候選 (傳上面任一種廣義條件)，再讓使用者
+       挑或自己挑最近似的。
+- 全部試過仍然空，再回報「目前沒有相關紀錄」；回報時可選 1 句說「試過的關鍵詞
+  有 X / Y / Z」讓使用者知道你不是隨便回。**不要反問使用者該用什麼名稱** —
+  那是你的工作。
+- 工具沒回的不要編造任何紀錄；空集合就是空集合，不准補造。"""
 
 
 # Only when there's a pending daily push to reply to.
