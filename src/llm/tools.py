@@ -207,14 +207,30 @@ TOOLS = [
         "function": {
             "name": "query_personal_records",
             "description": (
-                "Query user's personal records. Call when user asks about PRs or max weights."
+                "Query user's personal records. Call when user asks about PRs or max weights. "
+                "exercise_name is treated as a fuzzy keyword (matches name, name_zh, or any "
+                "alias by substring), so '深蹲' returns 槓鈴背蹲 / 高腳杯深蹲 etc. in one go. "
+                "Use muscle_group for category words like 三頭 / 肩 / 臀 — both Chinese and "
+                "English (Triceps) are accepted. Each PR row carries date + session_type."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "exercise_name": {
                         "type": "string",
-                        "description": "Filter by exercise (omit for all)",
+                        "description": (
+                            "Fuzzy keyword: matches Exercise.name / name_zh / aliases by "
+                            "substring. Pass the user's wording as-is."
+                        ),
+                    },
+                    "muscle_group": {
+                        "type": "string",
+                        "description": (
+                            "Muscle group filter, fuzzy substring (Chinese or English). "
+                            "Colloquial words work: '三頭' / '三頭肌' / 'Triceps' all hit. "
+                            "'臀' picks up 臀大肌 + 臀中肌. Picks up exercises where this "
+                            "muscle is primary OR secondary."
+                        ),
                     },
                 },
             },
@@ -275,15 +291,28 @@ TOOLS = [
         "function": {
             "name": "query_exercise_progression",
             "description": (
-                "Query weight/rep progression for a specific exercise over time. "
-                "Use when user asks about progress on a particular lift."
+                "Query weight/rep progression over time. exercise_name is a fuzzy keyword: "
+                "if it matches one exercise (alias / name) you get the legacy single-exercise "
+                "shape; if it matches a family (e.g. '硬舉' -> 槓鈴硬舉 + 相撲硬舉 + RDLs) you "
+                "get one block per matched exercise. Use muscle_group for broad category asks "
+                "('三頭 / 肩'). Every session row includes session_type."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "exercise_name": {
                         "type": "string",
-                        "description": "Exercise name (Chinese or English)",
+                        "description": (
+                            "Fuzzy keyword (Chinese or English). May match many exercises."
+                        ),
+                    },
+                    "muscle_group": {
+                        "type": "string",
+                        "description": (
+                            "Muscle group, fuzzy substring (Chinese or English). "
+                            "'三頭' / '三頭肌' / 'Triceps' all match. Picks up exercises "
+                            "where this muscle is primary OR secondary."
+                        ),
                     },
                     "days": {
                         "type": "integer",
@@ -298,7 +327,47 @@ TOOLS = [
                         "description": "Inclusive end YYYY-MM-DD",
                     },
                 },
-                "required": ["exercise_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_exercise_catalog",
+            "description": (
+                "Cheap directory lookup: which exercises in the catalog match this keyword / "
+                "muscle group / movement pattern, and has the user logged each one? Returns "
+                "names, aliases, primary muscles, has_pr flag, best display, and last logged "
+                "date — but NOT full set/rep history. Call this FIRST when the user asks a "
+                "vague 'X 相關紀錄' question so you can enumerate candidates before drilling "
+                "into query_personal_records or query_exercise_progression."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Fuzzy keyword (Chinese or English). Matches name / name_zh / "
+                            "any alias by substring."
+                        ),
+                    },
+                    "muscle_group": {
+                        "type": "string",
+                        "description": (
+                            "Muscle group, fuzzy substring (Chinese or English). "
+                            "'三頭' / '三頭肌' / 'Triceps' / '股四頭' all match."
+                        ),
+                    },
+                    "movement_pattern": {
+                        "type": "string",
+                        "description": (
+                            "One of: squat, lunge, hinge, horizontal_push, vertical_push, "
+                            "horizontal_pull, vertical_pull, core_flexion, core_rotation, "
+                            "core_stability, glute_iso, arm_iso, power, mobility, warmup."
+                        ),
+                    },
+                },
             },
         },
     },

@@ -112,7 +112,12 @@ async def _update_user_profile(db: AsyncSession, user_id: int, args: dict) -> di
 
 
 async def _query_personal_records(db: AsyncSession, user_id: int, args: dict) -> dict:
-    prs = await workout.get_personal_records(db, user_id, args.get("exercise_name"))
+    prs = await workout.get_personal_records(
+        db,
+        user_id,
+        exercise_name=args.get("exercise_name"),
+        muscle_group=args.get("muscle_group"),
+    )
     return {"personal_records": prs}
 
 
@@ -136,7 +141,23 @@ async def _query_exercise_progression(db: AsyncSession, user_id: int, args: dict
     days = args.get("days", 90)
     df, dt = _parse_window(args)
     return await workout.get_exercise_progression(
-        db, user_id, args["exercise_name"], days, date_from=df, date_to=dt
+        db,
+        user_id,
+        exercise_name=args.get("exercise_name"),
+        days=days,
+        date_from=df,
+        date_to=dt,
+        muscle_group=args.get("muscle_group"),
+    )
+
+
+async def _query_exercise_catalog(db: AsyncSession, user_id: int, args: dict) -> dict:
+    return await workout.get_exercise_catalog(
+        db,
+        user_id,
+        query=args.get("query"),
+        muscle_group=args.get("muscle_group"),
+        movement_pattern=args.get("movement_pattern"),
     )
 
 
@@ -321,6 +342,7 @@ _HANDLERS = {
     "query_training_history": _query_training_history,
     "query_training_detail": _query_training_detail,
     "query_exercise_progression": _query_exercise_progression,
+    "query_exercise_catalog": _query_exercise_catalog,
     "query_conditions": _query_conditions,
     "query_exercise_notes": _query_exercise_notes,
     "log_cardio": _log_cardio,

@@ -92,6 +92,24 @@ class MuscleGroup(Base):
     name_zh: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
 
+    aliases: Mapped[list["MuscleGroupAlias"]] = relationship(back_populates="muscle_group")
+
+
+class MuscleGroupAlias(Base):
+    __tablename__ = "muscle_group_aliases"
+    # Same alias can fan-out to multiple muscle groups ("肩" -> 三角肌 x3),
+    # so the alias column itself is NOT unique. Within one muscle group an
+    # alias must be unique.
+    __table_args__ = (
+        UniqueConstraint("muscle_group_id", "alias", name="uq_mga_group_alias"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    muscle_group_id: Mapped[int] = mapped_column(ForeignKey("muscle_groups.id"), nullable=False)
+    alias: Mapped[str] = mapped_column(String, nullable=False)
+
+    muscle_group: Mapped["MuscleGroup"] = relationship(back_populates="aliases")
+
 
 class Exercise(Base):
     __tablename__ = "exercises"

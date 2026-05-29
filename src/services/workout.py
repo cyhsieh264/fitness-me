@@ -1,12 +1,15 @@
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import (
     Exercise,
     ExerciseAlias,
+    ExerciseMuscle,
     ExerciseSet,
+    MuscleGroup,
+    MuscleGroupAlias,
     PersonalRecord,
     RawRecord,
     SessionExercise,
@@ -59,6 +62,94 @@ async def resolve_exercise(db: AsyncSession, name: str) -> Exercise | None:
     )
     found: Exercise | None = result.scalar_one_or_none()
     return found
+
+
+async def search_exercises(
+    db: AsyncSession,
+    *,
+    query: str | None = None,
+    muscle_group: str | None = None,
+    movement_pattern: str | None = None,
+) -> list[Exercise]:
+    """Fuzzy / muscle / movement-pattern lookup for exercises.
+
+    - query: case-insensitive substring against Exercise.name, Exercise.name_zh,
+      or any ExerciseAlias.alias. Plain folks' words like "深蹲" / "硬舉" /
+      "划船" will land here.
+    - muscle_group: matches by (a) substring on MuscleGroup.name /
+      MuscleGroup.name_zh OR (b) exact case-insensitive hit on
+      MuscleGroupAlias.alias. Joins via ExerciseMuscle (primary or secondary).
+      Substring covers "三頭" / "臀" / "tricep" / "股四頭"; the alias table
+      covers colloquial words whose Chinese root doesn't appear in the formal
+      muscle name: "肩" / "背" / "腿" / "核心".
+    - movement_pattern: exact match (case-insensitive) on
+      Exercise.movement_pattern.
+
+    Multiple filters AND together. Returns [] when no filter is provided —
+    "list every exercise" is never useful as a default and would dump the
+    entire catalogue into the LLM.
+    """
+    if not (query or muscle_group or movement_pattern):
+        return []
+
+    stmt = select(Exercise)
+
+    if query:
+        needle = f"%{query.lower()}%"
+        alias_match = select(ExerciseAlias.exercise_id).where(
+            func.lower(ExerciseAlias.alias).like(needle)
+        )
+        stmt = stmt.where(
+            or_(
+                func.lower(Exercise.name).like(needle),
+                func.lower(Exercise.name_zh).like(needle),
+                Exercise.id.in_(alias_match),
+            )
+        )
+
+    if muscle_group:
+        # Match strategy (any of):
+        #   - substring on MuscleGroup.name (English, case-insensitive)
+        #   - substring on MuscleGroup.name_zh (so "三頭" -> 三頭肌)
+        #   - exact (case-insensitive) hit on a curated MuscleGroupAlias row,
+        #     used for words that don't share a root with the formal name:
+        #     「肩」 -> 三角肌 x3, 「背」 -> 闊背肌 + 菱形肌 + 斜方肌,
+        #     「核心」 -> 腹直/腹斜/腹橫 / etc.
+        mg_lower = muscle_group.lower()
+        mg_needle = f"%{mg_lower}%"
+        alias_hit = select(MuscleGroupAlias.muscle_group_id).where(
+            func.lower(MuscleGroupAlias.alias) == mg_lower
+        )
+        muscle_match = (
+            select(ExerciseMuscle.exercise_id)
+            .join(MuscleGroup, ExerciseMuscle.muscle_group_id == MuscleGroup.id)
+            .where(
+                or_(
+                    func.lower(MuscleGroup.name).like(mg_needle),
+                    func.lower(MuscleGroup.name_zh).like(mg_needle),
+                    MuscleGroup.id.in_(alias_hit),
+                )
+            )
+        )
+        stmt = stmt.where(Exercise.id.in_(muscle_match))
+
+    if movement_pattern:
+        stmt = stmt.where(func.lower(Exercise.movement_pattern) == movement_pattern.lower())
+
+    stmt = stmt.order_by(Exercise.id)
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+
+    # Dedup (shouldn't repeat with the joinless form above, but keeps
+    # this safe if a future branch adds an outer join).
+    seen: set[int] = set()
+    out: list[Exercise] = []
+    for ex in rows:
+        if ex.id in seen:
+            continue
+        seen.add(ex.id)
+        out.append(ex)
+    return out
 
 
 async def _next_order_num(db: AsyncSession, session_id: int) -> int:
@@ -386,20 +477,48 @@ async def get_training_detail(
 async def get_exercise_progression(
     db: AsyncSession,
     user_id: int,
-    exercise_name: str,
+    exercise_name: str | None = None,
     days: int = 90,
     date_from: date | None = None,
     date_to: date | None = None,
+    muscle_group: str | None = None,
 ) -> dict:
-    """Get weight progression for a specific exercise over time."""
-    exercise = await resolve_exercise(db, exercise_name)
-    display_name = exercise.name_zh if exercise else exercise_name
+    """Get weight progression, broadened to handle generic keywords.
+
+    Resolution order:
+      1. If exercise_name is a known alias / exact name (and no muscle_group
+         filter), behave like the original single-exercise lookup.
+      2. Otherwise expand via search_exercises(query, muscle_group).
+      3. If nothing matches AND exercise_name was given, fall back to
+         freeform text match on SessionExercise.exercise_name — preserves
+         lookup for user-logged names that aren't in the seeded catalogue.
+
+    Every per-session entry carries `session_type` so the LLM can say
+    "X kg 教練課" without a second query.
+    """
+    if not (exercise_name or muscle_group):
+        return {
+            "query": None,
+            "matched_exercises": [],
+            "period_days": days,
+            "exercises": [],
+        }
+
+    matched: list[Exercise] = []
+    if exercise_name and not muscle_group:
+        exact = await resolve_exercise(db, exercise_name)
+        if exact:
+            matched = [exact]
+    if not matched:
+        matched = await search_exercises(
+            db, query=exercise_name, muscle_group=muscle_group
+        )
 
     start, end = window_dates(days, date_from, date_to)
 
-    query = (
-        select(SessionExercise)
-        .join(TrainingSession)
+    base_query = (
+        select(SessionExercise, TrainingSession)
+        .join(TrainingSession, SessionExercise.session_id == TrainingSession.id)
         .where(
             TrainingSession.user_id == user_id,
             TrainingSession.date >= start,
@@ -407,72 +526,239 @@ async def get_exercise_progression(
         .order_by(TrainingSession.date.asc())
     )
     if end:
-        query = query.where(TrainingSession.date <= end)
+        base_query = base_query.where(TrainingSession.date <= end)
 
-    if exercise:
-        query = query.where(SessionExercise.exercise_id == exercise.id)
-    else:
-        query = query.where(SessionExercise.exercise_name == exercise_name)
+    async def _rows_for_exercise(exercise: Exercise | None) -> list[dict]:
+        q = base_query
+        if exercise is not None:
+            q = q.where(SessionExercise.exercise_id == exercise.id)
+        else:
+            assert exercise_name is not None
+            q = q.where(SessionExercise.exercise_name == exercise_name)
+        result = await db.execute(q)
+        pairs = result.all()
 
-    result = await db.execute(query)
-    session_exercises = result.scalars().all()
+        sessions_data = []
+        for se, sess in pairs:
+            sets_result = await db.execute(
+                select(ExerciseSet).where(ExerciseSet.session_exercise_id == se.id)
+            )
+            sets_display = [_format_set_compact(es) for es in sets_result.scalars().all()]
+            sessions_data.append(
+                {
+                    "date": sess.date.isoformat(),
+                    "session_type": sess.session_type,
+                    "sets": sets_display,
+                }
+            )
+        return sessions_data
 
-    progression = []
-    for se in session_exercises:
-        session: TrainingSession | None = await db.get(TrainingSession, se.session_id)
-        if not session:
-            continue
+    # Multi-match path (and single-match — we always populate the new shape).
+    exercises_block: list[dict] = []
+    matched_names: list[str] = []
+    if matched:
+        for ex in matched:
+            sessions_data = await _rows_for_exercise(ex)
+            matched_names.append(ex.name_zh)
+            exercises_block.append(
+                {
+                    "exercise": ex.name_zh,
+                    "total_sessions": len(sessions_data),
+                    "sessions": sessions_data,
+                }
+            )
+    elif exercise_name:
+        # Freeform text fallback for user-logged exercises not in catalogue.
+        sessions_data = await _rows_for_exercise(None)
+        if sessions_data:
+            matched_names.append(exercise_name)
+            exercises_block.append(
+                {
+                    "exercise": exercise_name,
+                    "total_sessions": len(sessions_data),
+                    "sessions": sessions_data,
+                }
+            )
 
-        sets_result = await db.execute(
-            select(ExerciseSet).where(ExerciseSet.session_exercise_id == se.id)
-        )
-        sets_display = [_format_set_compact(es) for es in sets_result.scalars().all()]
-
-        progression.append(
-            {
-                "date": session.date.isoformat(),
-                "sets": sets_display,
-            }
-        )
-
-    return {
-        "exercise": display_name,
+    response: dict = {
+        "query": exercise_name,
+        "muscle_group": muscle_group,
+        "matched_exercises": matched_names,
         "period_days": days,
-        "total_sessions": len(progression),
-        "progression": progression,
+        "exercises": exercises_block,
     }
+
+    # Legacy single-exercise shape so callers / prompts that read `exercise`
+    # and `progression` keep working unchanged.
+    if len(exercises_block) == 1:
+        only = exercises_block[0]
+        response["exercise"] = only["exercise"]
+        response["total_sessions"] = only["total_sessions"]
+        response["progression"] = [
+            {
+                "date": s["date"],
+                "session_type": s["session_type"],
+                "sets": s["sets"],
+            }
+            for s in only["sessions"]
+        ]
+    return response
 
 
 async def get_personal_records(
     db: AsyncSession,
     user_id: int,
     exercise_name: str | None = None,
+    muscle_group: str | None = None,
 ) -> list[dict]:
+    """List PRs, fuzzy-matched by exercise_name / muscle_group.
+
+    Each row includes the session_type ('self_training' / 'coach' / 'other')
+    on the achieved_date — so a single reply can say "X kg, 教練課, YYYY-MM-DD".
+    """
+    allowed_ids: set[int] | None = None
+    if exercise_name or muscle_group:
+        matches = await search_exercises(
+            db, query=exercise_name, muscle_group=muscle_group
+        )
+        allowed_ids = {ex.id for ex in matches}
+        if not allowed_ids:
+            return []
+
     query = (
         select(PersonalRecord)
         .where(PersonalRecord.user_id == user_id)
         .order_by(PersonalRecord.achieved_date.desc())
     )
+    if allowed_ids is not None:
+        query = query.where(PersonalRecord.exercise_id.in_(allowed_ids))
     result = await db.execute(query)
     records = result.scalars().all()
+    if not records:
+        return []
+
+    # Batch the (date -> session_type) lookup so we don't issue one SELECT per PR.
+    achieved_dates = {pr.achieved_date for pr in records}
+    sess_result = await db.execute(
+        select(TrainingSession.date, TrainingSession.session_type)
+        .where(
+            TrainingSession.user_id == user_id,
+            TrainingSession.date.in_(achieved_dates),
+        )
+    )
+    session_type_by_date: dict[date, str] = {row[0]: row[1] for row in sess_result.all()}
 
     prs = []
     for pr in records:
         exercise = await db.get(Exercise, pr.exercise_id)
         if not exercise:
             continue
-        if exercise_name and exercise_name.lower() not in (
-            exercise.name.lower(),
-            exercise.name_zh,
-        ):
-            continue
         prs.append(
             {
                 "exercise": exercise.name_zh,
                 "best": pr.weight_display or f"{pr.best_weight_kg}kg",
                 "date": pr.achieved_date.isoformat(),
+                "session_type": session_type_by_date.get(pr.achieved_date),
                 "next_target_kg": pr.next_target_kg,
             }
         )
 
     return prs
+
+
+async def get_exercise_catalog(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    query: str | None = None,
+    muscle_group: str | None = None,
+    movement_pattern: str | None = None,
+) -> dict:
+    """Cheap directory lookup: which exercises match X, and has the user logged them?
+
+    No ExerciseSet rows pulled — this is for the LLM to enumerate candidates
+    before drilling in with query_exercise_progression / query_personal_records.
+    """
+    matches = await search_exercises(
+        db, query=query, muscle_group=muscle_group, movement_pattern=movement_pattern
+    )
+    if not matches:
+        return {
+            "query": query,
+            "muscle_group": muscle_group,
+            "movement_pattern": movement_pattern,
+            "matched": [],
+        }
+
+    match_ids = [ex.id for ex in matches]
+
+    # PR map (one query for all matched exercises).
+    pr_result = await db.execute(
+        select(PersonalRecord).where(
+            PersonalRecord.user_id == user_id,
+            PersonalRecord.exercise_id.in_(match_ids),
+        )
+    )
+    pr_by_ex: dict[int, PersonalRecord] = {pr.exercise_id: pr for pr in pr_result.scalars().all()}
+
+    # Last logged date per exercise — single query, then bucket in Python.
+    last_logged_result = await db.execute(
+        select(
+            SessionExercise.exercise_id,
+            func.max(TrainingSession.date),
+        )
+        .join(TrainingSession, SessionExercise.session_id == TrainingSession.id)
+        .where(
+            TrainingSession.user_id == user_id,
+            SessionExercise.exercise_id.in_(match_ids),
+        )
+        .group_by(SessionExercise.exercise_id)
+    )
+    last_logged_by_ex: dict[int, date] = {row[0]: row[1] for row in last_logged_result.all()}
+
+    # Aliases + primary muscle names (one query each, then group).
+    alias_result = await db.execute(
+        select(ExerciseAlias.exercise_id, ExerciseAlias.alias).where(
+            ExerciseAlias.exercise_id.in_(match_ids)
+        )
+    )
+    aliases_by_ex: dict[int, list[str]] = {}
+    for ex_id, alias in alias_result.all():
+        aliases_by_ex.setdefault(ex_id, []).append(alias)
+
+    muscle_result = await db.execute(
+        select(ExerciseMuscle.exercise_id, MuscleGroup.name_zh, ExerciseMuscle.is_primary)
+        .join(MuscleGroup, ExerciseMuscle.muscle_group_id == MuscleGroup.id)
+        .where(ExerciseMuscle.exercise_id.in_(match_ids))
+    )
+    primary_by_ex: dict[int, list[str]] = {}
+    secondary_by_ex: dict[int, list[str]] = {}
+    for ex_id, mg_name_zh, is_primary in muscle_result.all():
+        bucket = primary_by_ex if is_primary else secondary_by_ex
+        bucket.setdefault(ex_id, []).append(mg_name_zh)
+
+    catalog: list[dict] = []
+    for ex in matches:
+        pr = pr_by_ex.get(ex.id)
+        last_logged = last_logged_by_ex.get(ex.id)
+        catalog.append(
+            {
+                "exercise": ex.name_zh,
+                "name_en": ex.name,
+                "aliases": aliases_by_ex.get(ex.id, []),
+                "primary_muscles": primary_by_ex.get(ex.id, []),
+                "secondary_muscles": secondary_by_ex.get(ex.id, []),
+                "movement_pattern": ex.movement_pattern,
+                "has_pr": pr is not None,
+                "best": pr.weight_display if pr else None,
+                "best_date": pr.achieved_date.isoformat() if pr else None,
+                "last_logged_date": last_logged.isoformat() if last_logged else None,
+            }
+        )
+
+    return {
+        "query": query,
+        "muscle_group": muscle_group,
+        "movement_pattern": movement_pattern,
+        "matched": catalog,
+    }

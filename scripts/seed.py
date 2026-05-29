@@ -7,7 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.database import async_session, engine
-from src.db.models import Base, Exercise, ExerciseAlias, ExerciseMuscle, MuscleGroup
+from src.db.models import (
+    Base,
+    Exercise,
+    ExerciseAlias,
+    ExerciseMuscle,
+    MuscleGroup,
+    MuscleGroupAlias,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,24 +26,66 @@ MUSCLE_GROUPS = [
     {"name": "Hamstrings", "name_zh": "膕繩肌", "category": "lower_body"},
     {"name": "Adductors", "name_zh": "內收肌群", "category": "lower_body"},
     {"name": "Hip Flexors", "name_zh": "髖屈肌", "category": "lower_body"},
+    {"name": "Iliopsoas", "name_zh": "髂腰肌", "category": "lower_body"},
+    {"name": "TFL", "name_zh": "闊筋膜張肌", "category": "lower_body"},
     {"name": "Calves", "name_zh": "小腿肌", "category": "lower_body"},
+    {"name": "Tibialis Anterior", "name_zh": "脛前肌", "category": "lower_body"},
     # Upper push
     {"name": "Chest", "name_zh": "胸肌", "category": "upper_push"},
     {"name": "Anterior Deltoids", "name_zh": "前三角肌", "category": "upper_push"},
     {"name": "Lateral Deltoids", "name_zh": "中三角肌", "category": "upper_push"},
     {"name": "Triceps", "name_zh": "三頭肌", "category": "upper_push"},
+    {"name": "Serratus Anterior", "name_zh": "前鋸肌", "category": "upper_push"},
+    {"name": "Rotator Cuff", "name_zh": "旋轉肌群", "category": "upper_push"},
     # Upper pull
     {"name": "Lats", "name_zh": "闊背肌", "category": "upper_pull"},
     {"name": "Rhomboids", "name_zh": "菱形肌", "category": "upper_pull"},
     {"name": "Rear Deltoids", "name_zh": "後三角肌", "category": "upper_pull"},
     {"name": "Biceps", "name_zh": "二頭肌", "category": "upper_pull"},
+    {"name": "Brachialis", "name_zh": "肱肌", "category": "upper_pull"},
     {"name": "Trapezius", "name_zh": "斜方肌", "category": "upper_pull"},
+    {"name": "Forearms", "name_zh": "前臂肌群", "category": "upper_pull"},
     # Core
     {"name": "Rectus Abdominis", "name_zh": "腹直肌", "category": "core"},
     {"name": "Obliques", "name_zh": "腹斜肌", "category": "core"},
     {"name": "Transverse Abdominis", "name_zh": "腹橫肌", "category": "core"},
     {"name": "Erector Spinae", "name_zh": "豎脊肌", "category": "core"},
+    {"name": "Pelvic Floor", "name_zh": "骨盆底肌", "category": "core"},
 ]
+
+# Colloquial trigger words that should map to one or more formal MuscleGroup
+# rows. Keyed by MuscleGroup.name (English). A single alias can fan out to
+# multiple muscles ("肩" -> 三角肌 x3) — just list it under each.
+# Match in search_exercises is case-insensitive exact equality on alias.
+MUSCLE_GROUP_ALIASES: dict[str, list[str]] = {
+    # Shoulders — 三角肌 doesn't contain 「肩」 so substring match misses it.
+    "Anterior Deltoids": ["肩", "肩膀", "shoulder", "shoulders", "delts", "deltoids"],
+    "Lateral Deltoids":  ["肩", "肩膀", "shoulder", "shoulders", "delts", "deltoids"],
+    "Rear Deltoids":     ["肩", "肩膀", "shoulder", "shoulders", "delts", "deltoids"],
+    # Back — none of 闊背 / 菱形 / 斜方 share the 「背」 root broadly enough.
+    "Lats":      ["背", "back"],
+    "Rhomboids": ["背", "back", "上背", "upper back"],
+    "Trapezius": ["背", "back", "上背", "upper back"],
+    # Lower back colloquial.
+    "Erector Spinae": ["腰", "lower back"],
+    # Legs umbrella — user says 「腿」 / 「大腿」 expecting whole front+back chain.
+    "Quadriceps": ["大腿", "腿", "leg", "legs", "thigh"],
+    "Hamstrings": ["大腿", "腿", "leg", "legs", "thigh"],
+    "Adductors":  ["大腿", "腿", "leg", "legs", "thigh"],
+    "Hip Flexors": ["大腿", "腿", "leg", "legs", "thigh"],
+    # Glutes colloquial.
+    "Glutes":         ["屁股", "翹臀", "butt"],
+    "Gluteus Medius": ["屁股", "翹臀", "butt"],
+    # Core umbrella.
+    "Rectus Abdominis":     ["核心", "core"],
+    "Obliques":             ["核心", "core"],
+    "Transverse Abdominis": ["核心", "core"],
+    # Arms — secondary movers.
+    "Brachialis": ["hammer", "反握"],
+    "Forearms":   ["前臂", "forearm", "握力", "grip"],
+    # Shoulder rehab.
+    "Rotator Cuff": ["rotator", "外旋肌"],
+}
 
 # Tuple format:
 # (name, name_zh, type, equipment, movement_pattern, is_assisted,
@@ -929,16 +978,36 @@ EXERCISES = [
 async def seed_muscle_groups(session: AsyncSession) -> dict[str, int]:
     existing = (await session.execute(select(MuscleGroup))).scalars().all()
     if existing:
-        return {mg.name: mg.id for mg in existing}
+        name_to_id = {mg.name: mg.id for mg in existing}
+    else:
+        name_to_id = {}
+        for mg_data in MUSCLE_GROUPS:
+            mg = MuscleGroup(**mg_data)
+            session.add(mg)
+            await session.flush()
+            name_to_id[mg.name] = mg.id
 
-    name_to_id = {}
-    for mg_data in MUSCLE_GROUPS:
-        mg = MuscleGroup(**mg_data)
-        session.add(mg)
-        await session.flush()
-        name_to_id[mg.name] = mg.id
-
+    await seed_muscle_group_aliases(session, name_to_id)
     return name_to_id
+
+
+async def seed_muscle_group_aliases(
+    session: AsyncSession, name_to_id: dict[str, int]
+) -> None:
+    """Idempotent: insert any alias that isn't already present for its group."""
+    existing_rows = (await session.execute(select(MuscleGroupAlias))).scalars().all()
+    existing_pairs = {(row.muscle_group_id, row.alias.lower()) for row in existing_rows}
+
+    for mg_name, aliases in MUSCLE_GROUP_ALIASES.items():
+        mg_id = name_to_id.get(mg_name)
+        if mg_id is None:
+            logger.warning("MUSCLE_GROUP_ALIASES references unknown muscle %s", mg_name)
+            continue
+        for alias in aliases:
+            if (mg_id, alias.lower()) in existing_pairs:
+                continue
+            session.add(MuscleGroupAlias(muscle_group_id=mg_id, alias=alias))
+            existing_pairs.add((mg_id, alias.lower()))
 
 
 async def seed_exercises(session: AsyncSession, muscle_map: dict[str, int]) -> None:
