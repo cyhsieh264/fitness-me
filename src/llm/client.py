@@ -10,16 +10,20 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 30
 
-# Per-attempt parameter overrides. Identical retries with the same
-# reasoning budget tend to hit the same Gemini 2.5 Flash failure mode
-# (finish_reason=stop with empty content because thinking burns the
-# budget before any output is emitted). Stepping the budget down on each
-# retry trades reasoning quality for "actually returns something".
-# Attempt-3 also caps max_tokens to discourage runaway thinking.
+# Per-attempt parameter overrides. We LEAD with real reasoning budget so the
+# model can actually think like a coach (weigh the member's data, pick what to
+# say) instead of pattern-matching a canned reply — attempt 1 gets full effort
+# plus headroom so thinking doesn't starve the output.
+#
+# The ladder still steps DOWN on retry as a recovery mechanism: identical
+# retries at the same budget tend to repeat the same Gemini Flash failure mode
+# (finish_reason=stop with empty content because thinking burned the budget
+# before any output). So if attempt 1 comes back empty, attempt 2 drops the
+# budget, and attempt 3 disables thinking entirely to guarantee SOMETHING ships.
 ATTEMPT_OVERRIDES: list[dict] = [  # type: ignore[type-arg]
-    {"reasoning_effort": "low",     "max_tokens": 2048},  # attempt 1
-    {"reasoning_effort": "minimal", "max_tokens": 2048},  # attempt 2
-    {"reasoning_effort": "disable", "max_tokens": 1024},  # attempt 3
+    {"reasoning_effort": "high",    "max_tokens": 4096},  # attempt 1: reason fully
+    {"reasoning_effort": "low",     "max_tokens": 2048},  # attempt 2: step down
+    {"reasoning_effort": "disable", "max_tokens": 1024},  # attempt 3: guarantee output
 ]
 MAX_RETRIES = len(ATTEMPT_OVERRIDES)
 

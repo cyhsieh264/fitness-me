@@ -86,10 +86,12 @@ async def test_non_retryable_propagates_immediately(monkeypatch):
 
 
 async def test_retry_escalates_reasoning_effort(monkeypatch):
-    """Each attempt steps reasoning_effort down: low -> minimal -> disable.
+    """Lead with full reasoning, then step down on retry: high -> low -> disable.
 
-    Lock the sequence in so a casual edit to ATTEMPT_OVERRIDES that breaks
-    the escalation contract fails this test rather than silently shipping.
+    Attempt 1 gets the real reasoning budget so the model can think like a
+    coach; the ladder only steps down to recover from empty completions. Lock
+    the sequence in so a casual edit to ATTEMPT_OVERRIDES that breaks the
+    contract fails this test rather than silently shipping.
     """
     seen_efforts: list[str] = []
     seen_max_tokens: list[int] = []
@@ -102,5 +104,5 @@ async def test_retry_escalates_reasoning_effort(monkeypatch):
     monkeypatch.setattr(client.litellm, "acompletion", fake_acompletion)
     await client.chat_completion(messages=[{"role": "user", "content": "hi"}])
 
-    assert seen_efforts == ["low", "minimal", "disable"]
-    assert seen_max_tokens == [2048, 2048, 1024]
+    assert seen_efforts == ["high", "low", "disable"]
+    assert seen_max_tokens == [4096, 2048, 1024]
