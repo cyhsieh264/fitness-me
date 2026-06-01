@@ -616,6 +616,30 @@ async def get_exercise_progression(
     return response
 
 
+async def _muscle_group_ids(db: AsyncSession, muscle_group: str) -> set[int]:
+    """Resolve a fuzzy muscle_group keyword to the MuscleGroup ids it matches.
+
+    Mirrors the muscle_group branch of search_exercises (substring on
+    name / name_zh + exact alias hit) so callers can tell whether an exercise
+    trains the queried muscle as a PRIMARY or merely SECONDARY mover.
+    """
+    mg_lower = muscle_group.lower()
+    mg_needle = f"%{mg_lower}%"
+    alias_hit = select(MuscleGroupAlias.muscle_group_id).where(
+        func.lower(MuscleGroupAlias.alias) == mg_lower
+    )
+    result = await db.execute(
+        select(MuscleGroup.id).where(
+            or_(
+                func.lower(MuscleGroup.name).like(mg_needle),
+                func.lower(MuscleGroup.name_zh).like(mg_needle),
+                MuscleGroup.id.in_(alias_hit),
+            )
+        )
+    )
+    return {row[0] for row in result.all()}
+
+
 async def get_personal_records(
     db: AsyncSession,
     user_id: int,
@@ -626,8 +650,13 @@ async def get_personal_records(
 
     Each row includes the session_type ('self_training' / 'coach' / 'other')
     on the achieved_date — so a single reply can say "X kg, 教練課, YYYY-MM-DD".
+    When filtered by muscle_group, each row also carries `muscle_role`
+    ('primary' / 'secondary') so the caller can lead with movements that
+    actually train that muscle and flag incidental ones (e.g. deadlift under
+    「背」 is secondary — a hinge, not a back lift).
     """
     allowed_ids: set[int] | None = None
+    primary_ex_ids: set[int] = set()
     if exercise_name or muscle_group:
         matches = await search_exercises(
             db, query=exercise_name, muscle_group=muscle_group
@@ -635,6 +664,17 @@ async def get_personal_records(
         allowed_ids = {ex.id for ex in matches}
         if not allowed_ids:
             return []
+        if muscle_group:
+            mg_ids = await _muscle_group_ids(db, muscle_group)
+            if mg_ids:
+                primary_rows = await db.execute(
+                    select(ExerciseMuscle.exercise_id).where(
+                        ExerciseMuscle.exercise_id.in_(allowed_ids),
+                        ExerciseMuscle.muscle_group_id.in_(mg_ids),
+                        ExerciseMuscle.is_primary.is_(True),
+                    )
+                )
+                primary_ex_ids = {row[0] for row in primary_rows.all()}
 
     query = (
         select(PersonalRecord)
@@ -664,15 +704,17 @@ async def get_personal_records(
         exercise = await db.get(Exercise, pr.exercise_id)
         if not exercise:
             continue
-        prs.append(
-            {
-                "exercise": exercise.name_zh,
-                "best": pr.weight_display or f"{pr.best_weight_kg}kg",
-                "date": pr.achieved_date.isoformat(),
-                "session_type": session_type_by_date.get(pr.achieved_date),
-                "next_target_kg": pr.next_target_kg,
-            }
-        )
+        row = {
+            "exercise": exercise.name_zh,
+            "best": pr.weight_display or f"{pr.best_weight_kg}kg",
+            "date": pr.achieved_date.isoformat(),
+            "session_type": session_type_by_date.get(pr.achieved_date),
+            "next_target_kg": pr.next_target_kg,
+        }
+        if muscle_group:
+            row["movement_pattern"] = exercise.movement_pattern
+            row["muscle_role"] = "primary" if pr.exercise_id in primary_ex_ids else "secondary"
+        prs.append(row)
 
     return prs
 

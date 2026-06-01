@@ -211,7 +211,10 @@ TOOLS = [
                 "exercise_name is treated as a fuzzy keyword (matches name, name_zh, or any "
                 "alias by substring), so '深蹲' returns 槓鈴背蹲 / 高腳杯深蹲 etc. in one go. "
                 "Use muscle_group for category words like 三頭 / 肩 / 臀 — both Chinese and "
-                "English (Triceps) are accepted. Each PR row carries date + session_type."
+                "English (Triceps) are accepted. Each PR row carries date + session_type. "
+                "When filtered by muscle_group, rows also carry muscle_role "
+                "('primary'=this muscle is a prime mover / 'secondary'=only assists) and "
+                "movement_pattern — lead with primary movements, flag secondary ones."
             ),
             "parameters": {
                 "type": "object",
