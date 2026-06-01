@@ -497,11 +497,22 @@ async def get_exercise_progression(
     "X kg 教練課" without a second query.
     """
     if not (exercise_name or muscle_group):
+        # This tool needs an exercise_name or muscle_group to return anything.
+        # Called with only a date range it would emit a bare empty list, which
+        # the LLM tends to misread as "the user has no training data" and then
+        # tells the user so. Return an explicit hint to redirect the caller.
         return {
             "query": None,
             "matched_exercises": [],
             "period_days": days,
             "exercises": [],
+            "hint": (
+                "No exercise_name or muscle_group given — this tool returns "
+                "nothing without one. For an OVERALL review use "
+                "query_personal_records (no filter returns ALL of the user's "
+                "PRs) or query_training_detail. An empty result here does NOT "
+                "mean the user has no records; do not tell them so."
+            ),
         }
 
     matched: list[Exercise] = []
