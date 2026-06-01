@@ -44,6 +44,13 @@ logger = logging.getLogger(__name__)
 LINE_MESSAGE_MAX_LENGTH = 5000
 REPLY_TOKEN_TIMEOUT_SEC = 25
 
+# Max rounds where the model may call tools before we force a prose answer.
+# Lets the model investigate adaptively (query -> see result -> query again)
+# instead of guessing every tool call up front in one blind batch. Bounded so
+# a confused model can't loop forever — worst case is MAX_TOOL_ROUNDS tool
+# calls plus one summary turn.
+MAX_TOOL_ROUNDS = 3
+
 SERVICE_PAUSED_MESSAGE = (
     "目前暫停提供服務（API 配額或認證異常），請稍後再試或聯絡管理員。"
 )
@@ -62,11 +69,14 @@ TURN2_PROMPT_WRITE = (
 )
 
 TURN2_PROMPT_QUERY = (
-    "請用繁體中文，依工具回傳的資料完整作答：\n"
-    "- 每一筆都列出來，含動作名、重量/組數、日期、以及 session_type "
-    "（self_training→自主訓練 / coach→教練課 / other→其他）。\n"
-    "- 不要刪節為「最高 N 公斤」這種單行摘要，除非使用者只問最高。\n"
-    "- 同類動作有多筆時全部列出，按動作分組。\n"
+    "請用繁體中文，依工具回傳的資料回答使用者的問題。先判斷他要的是「清單」"
+    "還是「判斷」：\n"
+    "- 清單型（列出 / 有哪些 / 最近紀錄）：每一筆都列出，含動作名、重量/組數、"
+    "日期、session_type（self_training→自主訓練 / coach→教練課 / other→其他），"
+    "同類動作按動作分組，不要刪節。\n"
+    "- 判斷型（哪個最好 / 最突出 / 進步最多 / 我適合什麼 / 哪裡該加強）：不要倒"
+    "清單，先排序比較挑出 1-3 個重點，給結論再附一句理由（進步幅度、相對體重、"
+    "對照一般人常模）。像教練講重點，不要像報表。\n"
     "- 工具沒回的紀錄絕對不要編造。找不到就說找不到，並建議用更廣的關鍵詞 "
     "或 muscle_group 再查一次。"
 )
@@ -192,121 +202,129 @@ async def _process_with_llm(
     messages.extend(history)
     messages.append({"role": "user", "content": text})
 
-    try:
-        response = await chat_completion(messages=messages, tools=TOOLS)
-    except (litellm.RateLimitError, litellm.AuthenticationError):
-        logger.exception("LLM quota / auth error — pausing service reply")
-        return SERVICE_PAUSED_MESSAGE
-    except Exception:
-        logger.exception("LLM call failed")
-        return "Something went wrong, please try again."
-
-    # Same defensive guard as turn 2 — Gemini may return empty choices.
-    if not response.choices:
-        logger.warning("LLM turn 1 returned no choices at all for text=%r", text[:200])
-        reply = await _empty_response_fallback(db, user_id, text, has_pending_daily_push)
-        await save_message(db, user_id, "user", text)
-        await save_message(db, user_id, "assistant", reply)
-        return reply
-
-    message = response.choices[0].message
-    tool_calls = message.tool_calls
-    finish_reason = getattr(response.choices[0], "finish_reason", "?")
-
-    if not tool_calls:
-        if not message.content:
-            logger.warning(
-                "LLM returned empty response (finish_reason=%s) for user text "
-                "preview=%r",
-                finish_reason,
-                text[:200],
-            )
-            reply = await _empty_response_fallback(
-                db, user_id, text, has_pending_daily_push
-            )
-        else:
-            reply = message.content
-        await save_message(db, user_id, "user", text)
-        await save_message(db, user_id, "assistant", reply)
-        return reply
-
-    # Execute tool calls and collect results
-    messages.append(message.model_dump())
-
+    # Multi-round tool-calling loop. Each round the model may call tools, read
+    # the results, and decide its next move (query -> see result -> query
+    # again, or compose several queries before answering). It ends a round with
+    # NO tool calls once it's ready to answer in prose. Bounded by
+    # MAX_TOOL_ROUNDS so a confused model can't loop forever.
+    final_reply: str | None = None
+    accumulated_tool_calls: list = []  # type: ignore[type-arg]
     has_db_write = False
     has_query = False
     has_daily_plan = False
-    for tc in tool_calls:
+
+    for round_num in range(1, MAX_TOOL_ROUNDS + 1):
         try:
-            arguments = json.loads(tc.function.arguments)
-        except json.JSONDecodeError:
-            logger.warning("Malformed tool arguments: %s", tc.function.arguments)
-            arguments = {}
+            response = await chat_completion(messages=messages, tools=TOOLS)
+        except (litellm.RateLimitError, litellm.AuthenticationError):
+            logger.exception("LLM quota / auth error — pausing service reply")
+            return SERVICE_PAUSED_MESSAGE
+        except Exception:
+            logger.exception("LLM call failed on round %d", round_num)
+            if round_num == 1:
+                return "Something went wrong, please try again."
+            break  # tool work already done — fall through to the summary nudge
 
-        logger.info("Tool call: %s(%s)", tc.function.name, arguments)
+        # Gemini may return empty choices entirely.
+        if not response.choices:
+            logger.warning(
+                "LLM round %d returned no choices for text=%r", round_num, text[:200]
+            )
+            if round_num == 1:
+                reply = await _empty_response_fallback(
+                    db, user_id, text, has_pending_daily_push
+                )
+                await save_message(db, user_id, "user", text)
+                await save_message(db, user_id, "assistant", reply)
+                return reply
+            break
 
-        tool_name = tc.function.name or ""
-        result = await execute_tool(db, user_id, tool_name, arguments)
+        message = response.choices[0].message
+        tool_calls = message.tool_calls
+        finish_reason = getattr(response.choices[0], "finish_reason", "?")
 
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": result,
-            }
-        )
+        if not tool_calls:
+            # Model is done calling tools — this turn's content is the answer.
+            if message.content:
+                final_reply = message.content
+            elif round_num == 1:
+                logger.warning(
+                    "LLM returned empty response (finish_reason=%s) for user text "
+                    "preview=%r",
+                    finish_reason,
+                    text[:200],
+                )
+                final_reply = await _empty_response_fallback(
+                    db, user_id, text, has_pending_daily_push
+                )
+            # Empty content after tool work falls to the summary nudge below.
+            break
 
-        if tool_name.startswith(("log_", "update_", "resolve_", "manage_goal")):
-            has_db_write = True
-        if tool_name.startswith("query_"):
-            has_query = True
-        if tool_name == "update_daily_plan":
-            has_daily_plan = True
+        # Model wants tools: record the assistant turn, then run this batch.
+        messages.append(message.model_dump())
+        accumulated_tool_calls.extend(tool_calls)
+        for tc in tool_calls:
+            try:
+                arguments = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                logger.warning("Malformed tool arguments: %s", tc.function.arguments)
+                arguments = {}
 
-    # Save raw record if any DB write happened (skip for daily plan updates)
+            logger.info("Tool call (round %d): %s(%s)", round_num, tc.function.name, arguments)
+
+            tool_name = tc.function.name or ""
+            result = await execute_tool(db, user_id, tool_name, arguments)
+
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                }
+            )
+
+            if tool_name.startswith(("log_", "update_", "resolve_", "manage_goal")):
+                has_db_write = True
+            if tool_name.startswith("query_"):
+                has_query = True
+            if tool_name == "update_daily_plan":
+                has_daily_plan = True
+
+    # Save raw record if any DB write happened (skip for daily plan updates).
     if has_db_write and not has_daily_plan:
-        record_type = _infer_record_type(tool_calls)
+        record_type = _infer_record_type(accumulated_tool_calls)
         await save_raw_record(db, user_id, text, record_type)
 
-    # Turn 2: LLM generates final response from tool results.
-    # Gemini 2.5 Flash reliably returns empty when given just
-    # `[tool_call, tool_result]` and expected to summarize implicitly —
-    # an explicit "please summarize" nudge dramatically reduces empty
-    # completions on this round-trip.
-    #
-    # Branch on tool type: writes get a terse confirmation; pure queries get
-    # the "list every row" prompt (spec-004 fix for drip-fed answers).
-    if has_query and not has_db_write:
-        turn2_content = TURN2_PROMPT_QUERY
-    else:
-        turn2_content = TURN2_PROMPT_WRITE
-    messages.append({"role": "user", "content": turn2_content})
-    try:
-        response2 = await chat_completion(messages=messages)
-    except (litellm.RateLimitError, litellm.AuthenticationError):
-        logger.exception("LLM quota / auth error on turn 2 — pausing service reply")
-        return SERVICE_PAUSED_MESSAGE
-    except Exception:
-        logger.exception("LLM turn 2 failed")
-        return "Recorded, but failed to generate summary."
+    # If the model never settled into a prose answer — it hit the round cap
+    # still wanting tools, or went silent right after tool results — force a
+    # final text-only summary. Gemini Flash reliably returns empty when given
+    # just `[tool_call, tool_result]` and expected to summarize implicitly, so
+    # an explicit nudge (and dropping tools) gets a real answer out.
+    if final_reply is None:
+        if has_query and not has_db_write:
+            summary_nudge = TURN2_PROMPT_QUERY
+        else:
+            summary_nudge = TURN2_PROMPT_WRITE
+        messages.append({"role": "user", "content": summary_nudge})
+        try:
+            response2 = await chat_completion(messages=messages)
+        except (litellm.RateLimitError, litellm.AuthenticationError):
+            logger.exception("LLM quota / auth error on summary turn — pausing")
+            return SERVICE_PAUSED_MESSAGE
+        except Exception:
+            logger.exception("LLM summary turn failed")
+            return "Recorded, but failed to generate summary."
 
-    # Gemini 2.5 Flash intermittently returns no choices (or empty content)
-    # on the post-tool summary turn. Avoid IndexError and give the user a
-    # generic confirmation so at least the DB write isn't silent.
-    if not response2.choices:
-        logger.warning("LLM turn 2 returned no choices at all")
-        final_reply = "已記錄完成。"
-    else:
-        finish_reason_2 = getattr(response2.choices[0], "finish_reason", "?")
-        content_2 = response2.choices[0].message.content
-        if not content_2:
-            logger.warning(
-                "LLM turn 2 returned empty content (finish_reason=%s)",
-                finish_reason_2,
+        if not response2.choices or not response2.choices[0].message.content:
+            finish_reason_2 = (
+                getattr(response2.choices[0], "finish_reason", "?")
+                if response2.choices
+                else "no-choices"
             )
+            logger.warning("LLM summary turn returned empty (finish_reason=%s)", finish_reason_2)
             final_reply = "已記錄完成。"
         else:
-            final_reply = content_2
+            final_reply = response2.choices[0].message.content
 
     # Save bot suggestion if daily plan was updated
     if has_daily_plan:
