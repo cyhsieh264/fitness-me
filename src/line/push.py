@@ -25,6 +25,8 @@ Include these options naturally in your message:
 
 Keep it under 100 characters. Be warm and encouraging.
 If they trained hard recently, acknowledge it. If they rested, that's fine too.
+Plain text only — LINE does not render markdown, so no ** or # syntax.
+An emoji or two is fine.
 
 Context:
 {context}"""

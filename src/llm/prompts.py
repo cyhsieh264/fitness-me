@@ -69,6 +69,24 @@ ROLE (functional duties):
 - Answer health / training / nutrition questions with a coach's judgment"""
 
 
+_LINE_FORMATTING = """\
+LINE OUTPUT FORMAT (plain text only — LINE does NOT render markdown):
+- NEVER use markdown syntax: no **bold**, no # headings, no | tables |,
+  no `backticks`, no [text](url) links. LINE shows them as literal
+  symbols, which hurts readability instead of helping.
+- Structure with line breaks instead: short lines, one idea per line,
+  blank line between blocks. Use "-" or "・" for list items. Where you
+  would reach for a bold heading, use a plain label line（例如
+  「📌 本週重點」或「【訓練摘要】」）.
+- Emoji work as occasional accents — a section marker, a ✓ on a saved
+  record, 🎉 on a real PR. Not on every line, and plain text messages
+  with zero emoji are fine too.
+- No streaming: the user sees NOTHING until your final message arrives,
+  so there is no "thinking..." state to lean on. Never send 「讓我查一下
+  / 請稍等」 as the answer — do the tool calls, organize the result, and
+  reply once, complete and final."""
+
+
 _TODAY_ANCHOR_TMPL = """\
 TODAY ANCHOR:
 - TODAY: {today_iso} ({timezone}) — the current date. Use this exact value
@@ -481,6 +499,7 @@ def _always(body: str) -> _Renderer:
 
 MODULES: list[tuple[str, _Renderer]] = [
     ("base", _always(_BASE)),
+    ("line_formatting", _always(_LINE_FORMATTING)),
     ("today_anchor", _today_anchor),
     ("user_profile", _user_profile),
     ("active_goals", _active_goals),

@@ -354,9 +354,37 @@ def _infer_record_type(tool_calls: list) -> str:  # type: ignore[type-arg]
 
 IMAGE_TAG_RE = re.compile(r"\[IMAGE:(https?://\S+)\]")
 
+# LLMs habitually emit markdown even when the prompt forbids it, and LINE
+# renders plain text only — literal **asterisks** degrade readability. These
+# strip the common emphasis / heading / code syntaxes as a safety net behind
+# the prompt rule. Single asterisks are deliberately left alone: workout
+# notation ("40kg*10*4") uses them legitimately.
+_MD_CODE_FENCE_RE = re.compile(r"^```[^\n]*\n?", re.MULTILINE)
+_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_MD_BOLD_UNDERSCORE_RE = re.compile(r"__(.+?)__", re.DOTALL)
+_MD_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
+_MD_INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+
+
+def strip_markdown(text: str) -> str:
+    """Flatten markdown the LLM may emit into LINE-friendly plain text.
+
+    Keeps the [IMAGE:url] tag intact (it has no following parenthesis, so
+    the link pattern never matches it).
+    """
+    text = _MD_CODE_FENCE_RE.sub("", text)
+    text = _MD_BOLD_RE.sub(r"\1", text)
+    text = _MD_BOLD_UNDERSCORE_RE.sub(r"\1", text)
+    text = _MD_HEADING_RE.sub("", text)
+    text = _MD_INLINE_CODE_RE.sub(r"\1", text)
+    text = _MD_LINK_RE.sub(r"\1 \2", text)
+    return text
+
 
 def _build_messages(text: str) -> list:
     """Parse text into LINE messages, extracting [IMAGE:url] tags as ImageMessages."""
+    text = strip_markdown(text)
     messages: list = []
     remaining = text
     for match in IMAGE_TAG_RE.finditer(text):
@@ -516,4 +544,5 @@ async def _push_messages(user_id: str, messages: list) -> None:
 
 
 async def push_text(user_id: str, text: str) -> None:
-    await _push_messages(user_id, [TextMessage(text=_truncate(text))])
+    # Daily-push greetings are LLM-generated too — same plain-text rules.
+    await _push_messages(user_id, [TextMessage(text=_truncate(strip_markdown(text)))])

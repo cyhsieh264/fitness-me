@@ -47,6 +47,18 @@ def test_today_anchor_always_present():
     assert "TODAY: 2026-05-29 (Asia/Taipei)" in text
 
 
+def test_line_formatting_always_present():
+    """The plain-text output rules must render in every context — LINE never
+    renders markdown regardless of what triggered the turn."""
+    for ctx in (
+        _base_ctx(),
+        _base_ctx(has_pending_daily_push=True),
+        _base_ctx(image_in_flight="inbody"),
+    ):
+        assert "line_formatting" in active_section_names(ctx)
+        assert "LINE OUTPUT FORMAT" in build_system_prompt(ctx)
+
+
 def test_daily_push_only_when_pending():
     pending_ctx = _base_ctx(has_pending_daily_push=True)
     not_pending_ctx = _base_ctx(has_pending_daily_push=False)
