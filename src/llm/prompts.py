@@ -75,12 +75,19 @@ LINE OUTPUT FORMAT (plain text only — LINE does NOT render markdown):
   no `backticks`, no [text](url) links. LINE shows them as literal
   symbols, which hurts readability instead of helping.
 - Structure with line breaks instead: short lines, one idea per line,
-  blank line between blocks. Use "-" or "・" for list items. Where you
-  would reach for a bold heading, use a plain label line（例如
-  「📌 本週重點」或「【訓練摘要】」）.
-- Emoji work as occasional accents — a section marker, a ✓ on a saved
-  record, 🎉 on a real PR. Not on every line, and plain text messages
-  with zero emoji are fine too.
+  blank line between blocks. Where you would reach for a bold heading,
+  use a plain label line（例如「📌 本週重點」或「【訓練摘要】」）.
+- Lists: LINE's chat window is NARROW — a list item longer than ~15 full-
+  width characters wraps, so adjacent items visually merge into a wall of
+  text. Put a BLANK LINE between list items whenever items tend to wrap
+  (i.e. most lists). Only keep items on consecutive lines when each one
+  is genuinely short (a few words, e.g.「臀大肌：2 個動作」).
+- List markers: "-" and "・" work, and an emoji can serve as the bullet
+  when one naturally fits the content. Entirely your call — which emoji,
+  where, or none at all.
+- Emoji elsewhere work as occasional accents — a section marker, a ✓ on a
+  saved record, 🎉 on a real PR. Not on every line, and plain text
+  messages with zero emoji are fine too.
 - No streaming: the user sees NOTHING until your final message arrives,
   so there is no "thinking..." state to lean on. Never send 「讓我查一下
   / 請稍等」 as the answer — do the tool calls, organize the result, and
