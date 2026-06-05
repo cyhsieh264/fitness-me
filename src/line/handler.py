@@ -155,6 +155,9 @@ async def handle_text_message(event: MessageEvent) -> None:
     reply_token = event.reply_token
 
     if not is_user_allowed(line_user_id):
+        # The user id is the only handle an operator has for onboarding
+        # (LINE shows it nowhere else) and for spotting strangers knocking.
+        logger.warning("Unauthorized text message from %s", line_user_id)
         await _reply_text(reply_token, "Sorry, you are not authorized to use this bot.")
         return
 
@@ -493,6 +496,7 @@ async def handle_image_message(event: MessageEvent) -> None:
     message_id = event.message.id
 
     if not is_user_allowed(line_user_id):
+        logger.warning("Unauthorized image message from %s", line_user_id)
         await _reply_text(reply_token, "Sorry, you are not authorized to use this bot.")
         return
 

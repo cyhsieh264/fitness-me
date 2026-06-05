@@ -497,7 +497,7 @@ Set under **Settings → Secrets and variables → Actions**:
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Supabase service role key |
 | `SUPABASE_BUCKET` | `fitness-images` |
-| `ALLOWED_USER_IDS` | Your LINE user ID(s), comma-separated |
+| `ALLOWED_USER_IDS` | Whitelisted LINE user ID(s), comma-separated. Fail-closed: empty means NOBODY can talk to the bot. |
 | `ADMIN_API_KEY` | `openssl rand -hex 32` |
 | `ADMIN_LINE_USER_ID` | LINE user id (the operator) that receives admin notifications such as import-completion pushes. Required for `/admin/import-history`. |
 | `BASE_URL` | `https://<your-subdomain>.duckdns.org` |
@@ -514,6 +514,36 @@ Push to `main`. The workflow at `.github/workflows/deploy.yml`:
 4. SSHes in, writes `.env` from secrets, runs `docker compose pull && docker compose up -d`
 
 Caddy obtains the Let's Encrypt certificate on first start (~30 seconds). Then point LINE webhook to `https://<your-subdomain>.duckdns.org/webhook`.
+
+### Adding a new user
+
+The whitelist is fail-closed: only IDs in `ALLOWED_USER_IDS` can talk to the
+bot; everyone else gets a canned rejection before the LLM is ever invoked.
+
+1. Have the new user friend the bot (QR code on the LINE Developers
+   Console → Messaging API tab) and send it any message.
+2. Grab their LINE user ID from the app logs — unauthorized attempts are
+   logged with the ID:
+
+   ```shell
+   ssh <vm> 'docker compose -f ~/fitness-me/docker-compose.yml logs app' | grep Unauthorized
+   # ... Unauthorized text message from U1234567890abcdef...
+   ```
+
+3. Append the ID to the `ALLOWED_USER_IDS` secret (comma-separated):
+
+   ```shell
+   gh secret set ALLOWED_USER_IDS
+   ```
+
+4. Re-trigger the deploy so the VM's `.env` picks it up:
+
+   ```shell
+   gh workflow run deploy.yml
+   ```
+
+5. The user messages again — their DB row is created automatically and the
+   display name is backfilled from LINE on first contact.
 
 ### Day-2 ops
 
