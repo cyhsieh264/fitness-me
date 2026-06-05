@@ -148,6 +148,27 @@ async def _empty_response_fallback(
 configuration = Configuration(access_token=settings.line_channel_access_token)
 
 
+async def _backfill_display_name(user, line_user_id: str) -> None:
+    """Fill in the LINE display name for users that don't have one yet.
+
+    Webhook events carry only the user id — the name takes a separate Get
+    Profile call, which nothing did before, so every user row had
+    display_name=None. Runs inside the caller's transaction; failures
+    (user blocked the bot, transient API error) are logged and swallowed —
+    the name is nice-to-have, never worth failing the message for.
+    """
+    if user.display_name:
+        return
+    try:
+        async with AsyncApiClient(configuration) as api_client:
+            api = AsyncMessagingApi(api_client)
+            profile = await api.get_profile(line_user_id)
+        user.display_name = profile.display_name
+        logger.info("Backfilled display name for %s", line_user_id)
+    except Exception:
+        logger.exception("Get Profile failed for %s", line_user_id)
+
+
 async def handle_text_message(event: MessageEvent) -> None:
     start = time.monotonic()
     line_user_id = event.source.user_id
@@ -166,6 +187,7 @@ async def handle_text_message(event: MessageEvent) -> None:
     async with async_session() as db:
         async with db.begin():
             user = await get_or_create_user(db, line_user_id)
+            await _backfill_display_name(user, line_user_id)
             reply = await _process_with_llm(db, user.id, text)
 
     await _send_reply(line_user_id, reply_token, reply, start)
@@ -540,6 +562,7 @@ async def handle_image_message(event: MessageEvent) -> None:
     async with async_session() as db:
         async with db.begin():
             user = await get_or_create_user(db, line_user_id)
+            await _backfill_display_name(user, line_user_id)
             saved = await save_image(
                 db,
                 user_id=user.id,

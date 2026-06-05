@@ -60,6 +60,9 @@ async def get_profile_summary(db: AsyncSession, user_id: int) -> dict:
     latest_weight = weight_result.scalar_one_or_none()
 
     return {
+        # LINE display name, backfilled by the handler via Get Profile.
+        # Lets the coach address the member by name in the prompt.
+        "display_name": user.display_name,
         "training_habit": user.training_habit,
         "cardio_status": user.cardio_status,
         "target_body_fat_pct": user.target_body_fat_pct,
