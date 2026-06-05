@@ -59,6 +59,18 @@ def test_line_formatting_always_present():
         assert "LINE OUTPUT FORMAT" in build_system_prompt(ctx)
 
 
+def test_identity_guard_always_present():
+    """The bot must never disclose its underlying model/vendor — the guard
+    section renders in every context, no exceptions."""
+    for ctx in (
+        _base_ctx(),
+        _base_ctx(has_pending_daily_push=True),
+        _base_ctx(image_in_flight="inbody"),
+    ):
+        assert "identity_guard" in active_section_names(ctx)
+        assert "IDENTITY & INTERNAL DETAILS" in build_system_prompt(ctx)
+
+
 def test_daily_push_only_when_pending():
     pending_ctx = _base_ctx(has_pending_daily_push=True)
     not_pending_ctx = _base_ctx(has_pending_daily_push=False)
