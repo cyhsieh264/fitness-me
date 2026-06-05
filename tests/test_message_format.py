@@ -1,14 +1,19 @@
-"""Outbound LINE message formatting: markdown stripping + [IMAGE:url] parsing.
+"""Outbound LINE message formatting: markdown stripping, list spacing,
+[IMAGE:url] parsing.
 
 LINE renders plain text only, so strip_markdown is the safety net behind the
 prompt's LINE OUTPUT FORMAT rule. These tests lock in two invariants: common
 markdown syntax is flattened, and legitimate plain-text uses of the same
 characters (workout notation, the [IMAGE:url] tag) survive untouched.
+
+space_list_items is the same kind of safety net for list readability: long
+list items that wrap in LINE's narrow window get a blank line between them,
+while uniformly short lists stay tight.
 """
 
 from linebot.v3.messaging import ImageMessage, TextMessage
 
-from src.line.handler import _build_messages, strip_markdown
+from src.line.handler import _build_messages, space_list_items, strip_markdown
 
 
 class TestStripMarkdown:
@@ -50,6 +55,81 @@ class TestStripMarkdown:
     def test_hashtag_without_space_untouched(self):
         # "#1" is not a heading — heading syntax requires a space after #.
         assert strip_markdown("#1 深蹲") == "#1 深蹲"
+
+
+class TestSpaceListItems:
+    def test_long_dash_items_get_blank_lines(self):
+        text = (
+            "你昨天的訓練：\n"
+            "- 史密斯後弓箭步：主要訓練 股四頭肌 和 臀大肌。\n"
+            "- 槓鈴RDL：主要訓練 臀大肌 和 膕繩肌。\n"
+            "- 短槓肩推：主要訓練 前三角肌 和 中三角肌。"
+        )
+        expected = (
+            "你昨天的訓練：\n"
+            "- 史密斯後弓箭步：主要訓練 股四頭肌 和 臀大肌。\n"
+            "\n"
+            "- 槓鈴RDL：主要訓練 臀大肌 和 膕繩肌。\n"
+            "\n"
+            "- 短槓肩推：主要訓練 前三角肌 和 中三角肌。"
+        )
+        assert space_list_items(text) == expected
+
+    def test_short_items_stay_tight(self):
+        text = "練最多的肌群：\n- 臀大肌\n- 前三角肌\n- 二頭肌"
+        assert space_list_items(text) == text
+
+    def test_one_long_item_spaces_the_whole_run(self):
+        text = "- 臀大肌\n- 後三角肌：可以試試 Cable 後三角飛鳥或俯身啞鈴飛鳥"
+        expected = (
+            "- 臀大肌\n\n- 後三角肌：可以試試 Cable 後三角飛鳥或俯身啞鈴飛鳥"
+        )
+        assert space_list_items(text) == expected
+
+    def test_already_spaced_list_unchanged(self):
+        text = (
+            "- 史密斯後弓箭步：主要訓練 股四頭肌 和 臀大肌。\n"
+            "\n"
+            "- 槓鈴RDL：主要訓練 臀大肌 和 膕繩肌。"
+        )
+        assert space_list_items(text) == text
+
+    def test_emoji_bullets_get_blank_lines(self):
+        text = (
+            "\U0001F3CB️ 史密斯後弓箭步：主要訓練 股四頭肌 和 臀大肌。\n"
+            "\U0001F3CB️ 槓鈴RDL：主要訓練 臀大肌 和 膕繩肌。"
+        )
+        expected = text.replace("。\n", "。\n\n")
+        assert space_list_items(text) == expected
+
+    def test_single_item_unchanged(self):
+        text = "- 後三角肌：可以試試 Cable 後三角飛鳥，改善圓肩很有幫助。"
+        assert space_list_items(text) == text
+
+    def test_plain_paragraphs_unchanged(self):
+        text = "整體來說，昨天訓練的重點放在臀大肌和前三角肌。\n其他肌群各有一個動作。"
+        assert space_list_items(text) == text
+
+    def test_separate_runs_evaluated_independently(self):
+        # A long-item run gets spaced; a later all-short run stays tight.
+        text = (
+            "- 史密斯後弓箭步：主要訓練 股四頭肌 和 臀大肌。\n"
+            "- 槓鈴RDL：主要訓練 臀大肌 和 膕繩肌。\n"
+            "\n"
+            "肌群分佈：\n"
+            "- 臀大肌：2 個動作\n"
+            "- 股四頭肌：1 個動作"
+        )
+        expected = (
+            "- 史密斯後弓箭步：主要訓練 股四頭肌 和 臀大肌。\n"
+            "\n"
+            "- 槓鈴RDL：主要訓練 臀大肌 和 膕繩肌。\n"
+            "\n"
+            "肌群分佈：\n"
+            "- 臀大肌：2 個動作\n"
+            "- 股四頭肌：1 個動作"
+        )
+        assert space_list_items(text) == expected
 
 
 class TestBuildMessages:

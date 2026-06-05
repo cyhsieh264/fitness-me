@@ -382,9 +382,56 @@ def strip_markdown(text: str) -> str:
     return text
 
 
+# LINE's chat window is narrow: a list item beyond roughly one line of
+# full-width characters wraps, and adjacent wrapped items merge into a wall
+# of text. The prompt asks the model to blank-line-separate such items, but
+# replayed chat history anchors it back to the old tight style — so enforce
+# the spacing here as a safety net, same pattern as strip_markdown above.
+# Bullets recognized: "-", "・", "•", or a leading emoji (the prompt allows
+# emoji bullets, model's choice).
+_LIST_ITEM_RE = re.compile(
+    # "-", "・", "•" followed by a space
+    r"^(?:[-・•]\s+"
+    # or an emoji: Misc Symbols / Dingbats / Misc Symbols and Arrows BMP
+    # blocks plus the SMP emoji planes, with optional variation selector
+    r"|[\u2600-\u27BF\u2B00-\u2BFF\U0001F000-\U0001FAFF]\uFE0F?\s*\S)"
+)
+# Roughly one rendered line of full-width characters in the LINE bubble.
+_SHORT_ITEM_LEN = 15
+
+
+def space_list_items(text: str) -> str:
+    """Insert blank lines between consecutive list items unless all are short.
+
+    Runs of >= 2 bullet lines where any item would wrap get a blank line
+    between every item; runs of uniformly short items stay tight.
+    """
+    out: list[str] = []
+    run: list[str] = []
+
+    def flush_run() -> None:
+        if len(run) >= 2 and any(len(item) > _SHORT_ITEM_LEN for item in run):
+            for i, item in enumerate(run):
+                if i:
+                    out.append("")
+                out.append(item)
+        else:
+            out.extend(run)
+        run.clear()
+
+    for line in text.split("\n"):
+        if _LIST_ITEM_RE.match(line):
+            run.append(line)
+        else:
+            flush_run()
+            out.append(line)
+    flush_run()
+    return "\n".join(out)
+
+
 def _build_messages(text: str) -> list:
     """Parse text into LINE messages, extracting [IMAGE:url] tags as ImageMessages."""
-    text = strip_markdown(text)
+    text = space_list_items(strip_markdown(text))
     messages: list = []
     remaining = text
     for match in IMAGE_TAG_RE.finditer(text):
@@ -545,4 +592,7 @@ async def _push_messages(user_id: str, messages: list) -> None:
 
 async def push_text(user_id: str, text: str) -> None:
     # Daily-push greetings are LLM-generated too — same plain-text rules.
-    await _push_messages(user_id, [TextMessage(text=_truncate(strip_markdown(text)))])
+    await _push_messages(
+        user_id,
+        [TextMessage(text=_truncate(space_list_items(strip_markdown(text))))],
+    )
