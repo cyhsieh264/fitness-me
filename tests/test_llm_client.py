@@ -85,13 +85,11 @@ async def test_non_retryable_propagates_immediately(monkeypatch):
     assert state["n"] == 1
 
 
-async def test_retry_escalates_reasoning_effort(monkeypatch):
-    """Lead with full reasoning, then step down on retry: high -> low -> disable.
-
-    Attempt 1 gets the real reasoning budget so the model can think like a
-    coach; the ladder only steps down to recover from empty completions. Lock
-    the sequence in so a casual edit to ATTEMPT_OVERRIDES that breaks the
-    contract fails this test rather than silently shipping.
+async def test_retry_steps_down_reasoning_effort(monkeypatch):
+    """Step the thinking budget DOWN on retry: low -> minimal -> disable, with
+    output room (max_tokens) always above the thinking budget so thinking can't
+    starve the answer. Lock the sequence in so a casual edit to ATTEMPT_OVERRIDES
+    that reintroduces the starve-the-output / leak-prone config fails here.
     """
     seen_efforts: list[str] = []
     seen_max_tokens: list[int] = []
@@ -104,5 +102,33 @@ async def test_retry_escalates_reasoning_effort(monkeypatch):
     monkeypatch.setattr(client.litellm, "acompletion", fake_acompletion)
     await client.chat_completion(messages=[{"role": "user", "content": "hi"}])
 
-    assert seen_efforts == ["high", "low", "disable"]
-    assert seen_max_tokens == [4096, 2048, 1024]
+    assert seen_efforts == ["low", "minimal", "disable"]
+    assert seen_max_tokens == [3072, 2048, 1024]
+
+
+# A leaked tool-call dumped into text instead of a structured function call.
+_LEAKED = "```tool_code\nprint(default_api.update_daily_plan(user_plan='rest'))\n```"
+
+
+def test_leaked_scaffolding_is_not_usable():
+    """Content that is leaked tool-call grammar must count as unusable, so the
+    retry loop re-samples it before the handler ever sees it."""
+    assert client._is_usable(_resp(content=_LEAKED)) is False
+    # A real structured tool call alongside is still usable.
+    assert (
+        client._is_usable(
+            _resp(content=_LEAKED, tool_calls=[types.SimpleNamespace(id="t1")])
+        )
+        is True
+    )
+
+
+async def test_resamples_leaked_then_returns_clean(monkeypatch):
+    """The one-shot-LINE guarantee: a leak on attempt 1 is re-sampled and the
+    clean completion is what comes back — the leak never escapes the client."""
+    state = _patch_sequence(
+        monkeypatch, [_resp(content=_LEAKED), _resp(content="好的，今天休息！")]
+    )
+    result = await client.chat_completion(messages=[{"role": "user", "content": "hi"}])
+    assert state["n"] == 2
+    assert result.choices[0].message.content == "好的，今天休息！"

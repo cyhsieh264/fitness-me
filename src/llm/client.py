@@ -3,6 +3,7 @@ import logging
 import litellm
 
 from src.config import settings
+from src.llm.sanitize import contains_tool_scaffolding
 
 litellm.drop_params = True
 
@@ -10,20 +11,28 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 30
 
-# Per-attempt parameter overrides. We LEAD with real reasoning budget so the
-# model can actually think like a coach (weigh the member's data, pick what to
-# say) instead of pattern-matching a canned reply — attempt 1 gets full effort
-# plus headroom so thinking doesn't starve the output.
+# Per-attempt parameter overrides for Gemini's thinking config (litellm maps
+# reasoning_effort -> thinkingBudget). Two facts drive this ladder:
 #
-# The ladder still steps DOWN on retry as a recovery mechanism: identical
-# retries at the same budget tend to repeat the same Gemini Flash failure mode
-# (finish_reason=stop with empty content because thinking burned the budget
-# before any output). So if attempt 1 comes back empty, attempt 2 drops the
-# budget, and attempt 3 disables thinking entirely to guarantee SOMETHING ships.
+# 1. Thinking tokens are drawn from the SAME max_tokens budget as the answer.
+#    Leading with high (thinkingBudget≈4096) and max_tokens=4096 lets thinking
+#    starve the output to nothing — the empty-completion failure mode. So every
+#    rung keeps max_tokens well ABOVE the thinking budget, leaving room to
+#    actually answer.
+# 2. reasoning_effort low/medium/high all set includeThoughts=True, i.e. they
+#    ask Gemini to RETURN its reasoning — the raw material of the tool_code /
+#    thought leak. We never read reasoning_content, so thoughts buy us nothing
+#    and only add leak surface. Stepping down to "disable" (includeThoughts=
+#    False, no thinking) removes that surface entirely.
+#
+# The ladder also recovers on retry: a leaked or empty attempt re-samples with
+# LESS thinking (see _is_usable), and identical-budget retries tend to repeat
+# the same Flash failure — so each rung steps down. Attempt 3 disables thinking
+# outright to guarantee a clean, leak-free completion ships.
 ATTEMPT_OVERRIDES: list[dict] = [  # type: ignore[type-arg]
-    {"reasoning_effort": "high",    "max_tokens": 4096},  # attempt 1: reason fully
-    {"reasoning_effort": "low",     "max_tokens": 2048},  # attempt 2: step down
-    {"reasoning_effort": "disable", "max_tokens": 1024},  # attempt 3: guarantee output
+    {"reasoning_effort": "low",     "max_tokens": 3072},  # think lightly, ample output room
+    {"reasoning_effort": "minimal", "max_tokens": 2048},  # step down
+    {"reasoning_effort": "disable", "max_tokens": 1024},  # no thinking -> no leak, guarantee output
 ]
 MAX_RETRIES = len(ATTEMPT_OVERRIDES)
 
@@ -36,14 +45,24 @@ NON_RETRYABLE = (litellm.RateLimitError, litellm.AuthenticationError)
 def _is_usable(response: litellm.ModelResponse) -> bool:
     """Whether the response carries something a caller can act on.
 
-    Gemini 2.5 Flash intermittently returns finish_reason=stop with neither
-    text content nor tool calls. Such a response is dead weight — callers can
-    only fall back to a canned message — so we treat it as retryable.
+    Unusable (and therefore re-sampled while attempts remain) when EITHER:
+    - Gemini 2.5 Flash returned finish_reason=stop with neither text nor tool
+      calls — dead weight, callers could only fall back to a canned message; or
+    - the model leaked its tool-call grammar into the text instead of emitting
+      a real function call (see sanitize.contains_tool_scaffolding). Because
+      LINE replies are one-shot, re-sampling NOW — before the handler ships
+      anything — is how we turn an internal-disclosure bug into a silent retry
+      the user never sees. A genuine tool_calls payload is always usable.
     """
     if not response.choices:
         return False
     message = response.choices[0].message
-    return bool(message.content or message.tool_calls)
+    if message.tool_calls:
+        return True
+    content = message.content or ""
+    if not content:
+        return False
+    return not contains_tool_scaffolding(content)
 
 
 async def chat_completion(

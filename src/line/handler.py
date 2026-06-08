@@ -23,6 +23,7 @@ from src.config import settings
 from src.db.database import async_session
 from src.llm.client import chat_completion
 from src.llm.prompts import PromptContext, build_system_prompt
+from src.llm.sanitize import contains_tool_scaffolding, strip_model_scaffolding
 from src.llm.tool_executor import execute_tool
 from src.llm.tools import TOOLS
 from src.llm.vision import classify_and_parse_image
@@ -269,9 +270,25 @@ async def _process_with_llm(
         finish_reason = getattr(response.choices[0], "finish_reason", "?")
 
         if not tool_calls:
-            # Model is done calling tools — this turn's content is the answer.
-            if message.content:
-                final_reply = message.content
+            # Model is done calling tools — this turn's content is the answer,
+            # UNLESS Gemini dumped its tool-call grammar into the text instead
+            # of emitting a real call. That content leaks internal tool names
+            # and reasoning, so discard it wholesale and treat the turn as
+            # empty — salvaging a clean tail is unreliable (reasoning runs
+            # straight into the reply with no separator).
+            content = message.content or ""
+            if content and contains_tool_scaffolding(content):
+                logger.warning(
+                    "LLM leaked tool-call scaffolding as text (round %d, "
+                    "finish_reason=%s) — discarding, routing to fallback. "
+                    "preview=%r",
+                    round_num,
+                    finish_reason,
+                    content[:200],
+                )
+                content = ""
+            if content:
+                final_reply = content
             elif round_num == 1:
                 logger.warning(
                     "LLM returned empty response (finish_reason=%s) for user text "
@@ -340,7 +357,14 @@ async def _process_with_llm(
             logger.exception("LLM summary turn failed")
             return "Recorded, but failed to generate summary."
 
-        if not response2.choices or not response2.choices[0].message.content:
+        content2 = response2.choices[0].message.content if response2.choices else None
+        if content2 and contains_tool_scaffolding(content2):
+            logger.warning(
+                "LLM summary turn leaked tool-call scaffolding — discarding. preview=%r",
+                content2[:200],
+            )
+            content2 = None
+        if not content2:
             finish_reason_2 = (
                 getattr(response2.choices[0], "finish_reason", "?")
                 if response2.choices
@@ -349,7 +373,7 @@ async def _process_with_llm(
             logger.warning("LLM summary turn returned empty (finish_reason=%s)", finish_reason_2)
             final_reply = "已記錄完成。"
         else:
-            final_reply = response2.choices[0].message.content
+            final_reply = content2
 
     # Save bot suggestion if daily plan was updated
     if has_daily_plan:
@@ -456,7 +480,7 @@ def space_list_items(text: str) -> str:
 
 def _build_messages(text: str) -> list:
     """Parse text into LINE messages, extracting [IMAGE:url] tags as ImageMessages."""
-    text = space_list_items(strip_markdown(text))
+    text = space_list_items(strip_markdown(strip_model_scaffolding(text)))
     messages: list = []
     remaining = text
     for match in IMAGE_TAG_RE.finditer(text):
@@ -618,8 +642,7 @@ async def _push_messages(user_id: str, messages: list) -> None:
 
 
 async def push_text(user_id: str, text: str) -> None:
-    # Daily-push greetings are LLM-generated too — same plain-text rules.
-    await _push_messages(
-        user_id,
-        [TextMessage(text=_truncate(space_list_items(strip_markdown(text))))],
-    )
+    # Daily-push greetings are LLM-generated too — same plain-text rules,
+    # same scaffolding guard.
+    clean = space_list_items(strip_markdown(strip_model_scaffolding(text)))
+    await _push_messages(user_id, [TextMessage(text=_truncate(clean))])
