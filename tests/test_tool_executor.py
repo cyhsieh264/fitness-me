@@ -103,7 +103,16 @@ async def test_query_exercise_progression(
         )
 
     result = json.loads(
-        await execute_tool(db, user.id, "query_exercise_progression", {"exercise_name": "深蹲"})
+        await execute_tool(
+            db,
+            user.id,
+            "query_exercise_progression",
+            {
+                "exercise_name": "深蹲",
+                "date_from": "2026-03-01",
+                "date_to": "2026-03-31",
+            },
+        )
     )
 
     assert result["exercise"] == "槓鈴背蹲"
