@@ -126,7 +126,7 @@ Actions. The workflow runs tests, builds an image, deploys it to a configured
 host, and injects runtime configuration from GitHub Actions secrets. Do not
 commit `.env`, databases, exported records, or images.
 
-+## Appendix
+## Appendix
 
 <details>
 <summary><strong>Data model</strong></summary>
@@ -272,7 +272,6 @@ to invoke the bot. Use a stable hostname and point the LINE webhook at
 | Rebuild a VM | Repeat host bootstrap, update `VM_HOST` if needed, then re-run the workflow. |
 
 </details>
-
 
 ## License
 
