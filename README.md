@@ -1,66 +1,101 @@
+<p align="center">
+  <img src="assets/favicon.png" alt="FitnessMe logo" width="240" />
+</p>
+
 # FitnessMe
 
-A personal fitness assistant for LINE. It turns free-form workout notes and
-photos into structured training data, then makes that history queryable in the
-same chat interface.
+A personal fitness assistant for LINE: log a workout in your own words, send
+an InBody report, and ask about your progress in the same conversation.
+Training history and goals persist as structured records that later replies
+can look up.
 
-This is a personal production project and a reference implementation, not a
-medical, coaching, or multi-tenant product.
+## Why I built it
 
-## The problem
+My workout notes and InBody measurements were scattered across phone notes
+and spreadsheets. Before a session, I had to find the last working weight,
+reconcile different exercise names, and compare old records by hand. Recording
+each workout in a form added friction to a habit I wanted to keep simple.
 
-Workout records tend to be fragmented: informal notes use inconsistent names
-and formats, personal records are easy to forget, and InBody reports require
-manual transcription. A traditional form-based tracker only moves that
-friction into another UI.
+FitnessMe keeps the input familiar—mixed Chinese and English, shorthand,
+multiple set groups, or a report photo—and makes it useful later. An initial
+import brought 60 training days of existing notes into the same database.
+I built and operate it as a personal production project, refining it through
+ongoing use. It is a training companion, not a medical or certified coaching
+service.
 
-FitnessMe keeps the low-friction input—send a LINE message or image—while
-making records structured enough to query later:
+## In use
 
-```text
-深蹲 40kg*10*4
-我上次深蹲多重？
-今天自己練
-```
+One chat workflow: capture → understand → recall.
+The screenshots below are cropped conversation excerpts with names and raw
+InBody measurements redacted. Click an image to enlarge it.
 
-## What it does
+### Capture workouts
 
-| Capability | Approach |
+Log a self-directed workout or a coach-led session using the notation you
+already use. The reply makes the recorded exercises, weights, reps, and sets
+visible for review, including different weights within one exercise.
+
+| Self-directed workout logging | Coach-led workout logging |
 | --- | --- |
-| Workout logging | An LLM maps free-form, bilingual text to structured tool calls. |
-| PR tracking | Deterministic code calculates records and the next target. |
-| History queries | Tools retrieve training, body-composition, meal, and image history scoped to one user. |
-| Image extraction | A vision model classifies InBody reports and training sheets, then extracts structured fields. |
-| Daily planning | A scheduled LINE push collects the user's plan and uses recent training, goals, and active conditions to suggest a session. |
-| Reliability | Retry tiers and a rule-based fallback handle empty model responses; output sanitisation prevents tool-call scaffolding from reaching LINE. |
+| [<img src="assets/linebot/sample-2.jpg" alt="A self-directed workout message converted into a structured record" width="280" />](assets/linebot/sample-2.jpg) | [<img src="assets/linebot/sample-3.jpg" alt="A coach-led workout message converted into a structured record" width="280" />](assets/linebot/sample-3.jpg) |
+
+### Understand and plan
+
+A scheduled check-in asks about today's plan using recent training and active
+conditions as context. Report photos can become body-composition records;
+goals agreed in the conversation are stored for future interactions.
+
+| Daily check-in |
+| --- |
+| [<img src="assets/linebot/sample-1.jpg" alt="A LINE daily check-in and exercise-plan reply" width="280" />](assets/linebot/sample-1.jpg) |
+
+| InBody extraction | Calorie goals |
+| --- | --- |
+| [<img src="assets/linebot/sample-6.jpg" alt="An InBody report extraction reply with metrics redacted" width="280" />](assets/linebot/sample-6.jpg) | [<img src="assets/linebot/sample-7.jpg" alt="A calorie recommendation and a recorded daily intake goal" width="280" />](assets/linebot/sample-7.jpg) |
+
+### Recall progress
+
+Ask for a previous best or an exercise family such as deadlifts. The bot can
+retrieve related variants, their record dates, and next targets, then record
+a new result in the same conversation.
+
+| PR history query | Deadlift history and goals |
+| --- | --- |
+| [<img src="assets/linebot/sample-4.jpg" alt="A personal-record query and update in LINE" width="280" />](assets/linebot/sample-4.jpg) | [<img src="assets/linebot/sample-5.jpg" alt="Deadlift history and next targets in LINE" width="280" />](assets/linebot/sample-5.jpg) |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     line[LINE text or image] --> auth[Signature + fail-closed allowlist]
-    auth --> context[Context builder<br/>profile · date · recent history]
+    auth --> input{Message type}
+    input -->|Text| context[Context builder<br/>profile · date · recent history]
+    input -->|Image| vision[Vision extraction]
+    vision --> context
     context --> llm[Gemini via LiteLLM<br/>multi-round tool calling]
     llm <--> tools[Application tools]
     tools <--> db[(Postgres)]
-    line --> vision[Vision extraction]
-    vision --> tools
     llm --> reply[Sanitised LINE reply]
     reply --> line
 ```
 
-The model handles semantic work: interpreting free-form text, selecting tools,
-and producing a helpful response. The application owns critical state and
-business rules: identity checks, user scoping, date handling, import
-idempotency, PR calculations, retention, and fallbacks.
+The model interprets text and images, selects tools, and produces summaries
+and suggestions. Tools read and write the user's structured records; code
+calculates PRs and next weight targets, scopes data access, skips existing
+training dates during historical imports, and applies retention policies.
+Relative dates are interpreted by the model using an explicit current-date
+and timezone context, then parsed by the application. Advice and extracted
+values remain model outputs that the user needs to review.
 
 ## Engineering notes
 
 - **Stack:** Python 3.12, FastAPI, SQLAlchemy async, LiteLLM, Gemini, LINE Messaging API, Supabase Postgres/Storage, Docker, and GitHub Actions.
-- **Data isolation:** every data tool is scoped by `user_id`; the LINE allowlist is fail-closed, so an empty configuration admits nobody.
-- **Auditability:** raw inputs that create records, tool calls, and model finish reasons are logged. Chat history has a shorter retention window than structured records.
-- **Storage boundary:** photos live in the configured storage backend; Postgres stores metadata and storage keys only. Local and Supabase-backed implementations share one protocol.
-- **Production lessons:** fuzzy lookup, explicit date anchoring, and layered fallbacks were added after real conversations surfaced false negatives, hallucinated records, and empty responses.
+- **Fitness-specific data rules:** [workout services](src/services/workout.py) retain set groups, weight units, per-side loads, and session types. PR comparisons normalise weights and treat lower assistance as progress on assisted exercises; next weight targets follow a fixed increment rule.
+- **Queries across turns and tools:** [the message handler](src/line/handler.py) supplies recent conversation history and runs a bounded tool-calling loop. Exercise-name and alias searches let the model look up related variants before querying their records.
+- **Context from stored state:** [prompt assembly](src/llm/prompts.py) includes the current date, profile, active goals, and pending daily interaction. Image-specific instructions are included when an image is being processed.
+- **Reliability from real failures:** missed records, date confusion, and empty replies led to broader search, explicit date context, retry tiers, and rule-based fallbacks. [Regression tests](tests/) cover assisted PRs, historical dates, multi-round tool calls, empty responses, and tool-syntax leakage into chat.
+- **Access and data lifecycle:** the LINE allowlist is fail-closed, and data tools receive the authenticated `user_id`. Chat history is retained for 7 days; raw inputs and daily interactions for 90 days. Photos live behind a storage interface, with metadata and storage keys in Postgres.
+- **Delivery and operation:** [GitHub Actions](.github/workflows/deploy.yml) runs tests before building and deploying the Docker image. The appendix documents the schema, Admin API, VM setup, and routine operations.
 
 ## Quick start
 
@@ -100,9 +135,9 @@ uv run python -m scripts.import_history <LINE_USER_ID>
 ```
 
 Historical-import input must follow
-[`docs/import-template.txt`](docs/import-template.txt). Real workout records,
-photos, databases, and environment files are intentionally excluded from the
-repository.
+[`docs/import-template.txt`](docs/import-template.txt). Private source records,
+unredacted photos, databases, and environment files are excluded from version
+control; the reviewed README screenshots live in `assets/linebot/`.
 
 ## Repository layout
 
@@ -116,6 +151,9 @@ src/
   storage/    local and Supabase storage adapters
 tests/        unit and integration-style tests
 deploy/       Docker Compose and Caddy configuration
+assets/       README visual assets
+  favicon.png FitnessMe logo
+  linebot/    redacted LINE workflow screenshots
 docs/         import-file template
 ```
 
@@ -124,7 +162,7 @@ docs/         import-file template
 The production setup uses Docker Compose with Caddy, Supabase, and GitHub
 Actions. The workflow runs tests, builds an image, deploys it to a configured
 host, and injects runtime configuration from GitHub Actions secrets. Do not
-commit `.env`, databases, exported records, or images.
+commit `.env`, databases, private exported records, or unredacted images.
 
 ## Appendix
 
