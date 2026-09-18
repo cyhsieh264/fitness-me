@@ -4,64 +4,120 @@
 
 # FitnessMe
 
-A personal fitness assistant for LINE: log a workout in your own words, send
-an InBody report, and ask about your progress in the same conversation.
-Training history and goals persist as structured records that later replies
-can look up.
+A personal AI fitness companion on LINE, built around two needs: keeping
+exercise going without added pressure, and making progress easier to see.
+It combines gentle morning check-ins with conversational workout logging,
+record lookup, and feedback on training and InBody reports.
+
+[In use](#in-use) · [Architecture](#architecture) · [Quick start](#quick-start) · [Appendix](#appendix)
 
 ## Why I built it
 
-My workout notes and InBody measurements were scattered across phone notes
-and spreadsheets. Before a session, I had to find the last working weight,
-reconcile different exercise names, and compare old records by hand. Recording
-each workout in a form added friction to a habit I wanted to keep simple.
+I wanted to keep exercising, but often lacked a clear plan when I had time
+to train, or a clear sense of whether I was making progress. I wanted a daily
+nudge, timely feedback, and suggestions—without making a missed workout feel
+like a failed check-in.
 
-FitnessMe keeps the input familiar—mixed Chinese and English, shorthand,
-multiple set groups, or a report photo—and makes it useful later. An initial
-import brought 60 training days of existing notes into the same database.
-I built and operate it as a personal production project, refining it through
-ongoing use. It is a training companion, not a medical or certified coaching
-service.
+My coach recorded our sessions in the gym's app. My own workouts went into
+phone notes whenever I remembered; InBody reports were photos in my camera
+roll. To compare sessions or measurements, I had to find the right records,
+interpret the shorthand, and piece the picture together myself. Having some
+records did not make progress easy to see.
+
+FitnessMe brings those records into the same conversation as today's plans.
+A morning check-in makes room for training or rest. When I want to exercise,
+I can ask for suggestions informed by recent training and goals, look up
+earlier results, and log what I did. The model interprets text and photos;
+application tools store and retrieve the underlying records. I built and
+operate it for my own use; the interactions below are from that ongoing use.
 
 ## In use
 
-One chat workflow: capture → understand → recall.
-The screenshots below are cropped conversation excerpts with names and raw
-InBody measurements redacted. Click an image to enlarge it.
+The screenshots preserve the original chat viewport, with names and actual
+InBody measurements redacted. Some messages continue beyond the frame.
+Click an image to enlarge it.
 
-### Capture workouts
+### Pick up where the last workout left off
 
-Log a self-directed workout or a coach-led session using the notation you
-already use. The reply makes the recorded exercises, weights, reps, and sets
-visible for review, including different weights within one exercise.
+The left-hand screenshot shows a complete lookup-to-recording exchange:
 
-| Self-directed workout logging | Coach-led workout logging |
+1. **Look up a starting point.** I ask “滑輪下拉記錄？” (“My lat-pulldown record?”).
+   The reply gives my personal record (PR) of **12.25 kg**, achieved on
+   **2025-03-10**, and a next-weight reference of **13.5 kg**.
+2. **Report what I actually did.** I follow up with “我剛剛挑戰 13.75 成功了，8下，四組”
+   (“I just managed 13.75, eight reps, four sets”), without repeating the
+   exercise name or filling out a form.
+3. **See the result.** The bot replies with a saved-workout summary of
+   **13.75 kg × 8 reps × 4 sets** and reports a new PR. I can check the summary,
+   and the stored result is available for future queries.
+
+The 13.5 kg reference comes from a fixed increment rule, not an assessment
+of what is safe for me to lift. The recorded result is the **13.75 kg I report**,
+not the suggested target.
+
+The right-hand screenshot shows a related lookup: “My deadlift records?”
+returns barbell and sumo deadlifts with separate dates and targets, without
+requiring each exercise's stored name.
+
+| Look up a PR, then record the next one | Find related exercise records |
 | --- | --- |
-| [<img src="assets/linebot/sample-2.jpg" alt="A self-directed workout message converted into a structured record" width="280" />](assets/linebot/sample-2.jpg) | [<img src="assets/linebot/sample-3.jpg" alt="A coach-led workout message converted into a structured record" width="280" />](assets/linebot/sample-3.jpg) |
+| [<img src="assets/linebot/sample-4.jpg" alt="A lat-pulldown query followed by a new result, without repeating the exercise name" width="320" />](assets/linebot/sample-4.jpg) | [<img src="assets/linebot/sample-5.jpg" alt="A general deadlift query returning separate records for barbell and sumo deadlifts" width="320" />](assets/linebot/sample-5.jpg) |
 
-### Understand and plan
+In the current implementation, recent conversation supplies the exercise
+context; `query_personal_records` retrieves stored PRs, and
+`log_strength_training` writes the reported workout to Supabase Postgres.
+The model interprets the follow-up; application code compares weights and
+updates the PR. Records are written before I review the reply, so this is a
+post-write check, not an approval gate. See [Architecture](#architecture) and
+[Engineering notes](#engineering-notes) for the surrounding flow and safeguards.
 
-A scheduled check-in asks about today's plan using recent training and active
-conditions as context. Report photos can become body-composition records;
-goals agreed in the conversation are stored for future interactions.
+### Keep the notes in your own words
 
-| Daily check-in |
-| --- |
-| [<img src="assets/linebot/sample-1.jpg" alt="A LINE daily check-in and exercise-plan reply" width="280" />](assets/linebot/sample-1.jpg) |
+Those records start with the same shorthand I used in my phone notes:
+Chinese exercise names, `rdl`, `6kg each*10*4`, and different weights on
+successive lines. “Yesterday's coach session” supplies the date and session
+type without a separate form. The reply lays out what was recorded so I can
+check it afterward.
 
-| InBody extraction | Calorie goals |
+The self-directed session also shows a less obvious rule: on an assisted
+pull-up, a lower number means less assistance, not a weaker lift. The model
+interprets the note; code handles that distinction when comparing PRs.
+
+| Self-directed workout | Coach session |
 | --- | --- |
-| [<img src="assets/linebot/sample-6.jpg" alt="An InBody report extraction reply with metrics redacted" width="280" />](assets/linebot/sample-6.jpg) | [<img src="assets/linebot/sample-7.jpg" alt="A calorie recommendation and a recorded daily intake goal" width="280" />](assets/linebot/sample-7.jpg) |
+| [<img src="assets/linebot/sample-2.jpg" alt="Free-form workout notes recorded with per-side and assisted weights; less assistance is recognised as progress" width="320" />](assets/linebot/sample-2.jpg) | [<img src="assets/linebot/sample-3.jpg" alt="Yesterday's coach-session notes with mixed Chinese and English, per-side weights, and multiple set groups" width="320" />](assets/linebot/sample-3.jpg) |
 
-### Recall progress
+### Start with a photo, then continue the conversation
 
-Ask for a previous best or an exercise family such as deadlifts. The bot can
-retrieve related variants, their record dates, and next targets, then record
-a new result in the same conversation.
+I send a photo of an InBody report. After the bot extracts and records the
+measurements, I ask, “How does it compare with the last one?” The first screenshot
+keeps the photo message's lower edge and the start of that follow-up; the
+second picks up after the comparison, as the conversation turns to goals.
 
-| PR history query | Deadlift history and goals |
+The next exchange shows a different kind of follow-up. After asking about
+daily calories, I bring in a target discussed with my coach. The bot records
+that choice as a goal for future conversations—the model's suggestion is
+not the final decision.
+
+| Record an InBody report | Record the goal I choose |
 | --- | --- |
-| [<img src="assets/linebot/sample-4.jpg" alt="A personal-record query and update in LINE" width="280" />](assets/linebot/sample-4.jpg) | [<img src="assets/linebot/sample-5.jpg" alt="Deadlift history and next targets in LINE" width="280" />](assets/linebot/sample-5.jpg) |
+| [<img src="assets/linebot/sample-6.jpg" alt="The lower edge of an uploaded InBody photo, the recorded measurements with values redacted, and a follow-up asking to compare reports" width="320" />](assets/linebot/sample-6.jpg) | [<img src="assets/linebot/sample-7.jpg" alt="A calorie suggestion followed by the user's coach-discussed target being recorded as a goal" width="320" />](assets/linebot/sample-7.jpg) |
+
+### Make room for exercise—and rest
+
+A morning check-in brings the conversation back to today's plans: train on
+my own, see my coach, rest, or do something else. In this excerpt, my reply
+also becomes a record of yesterday's bike ride. Recent training and active
+conditions provide context; each exchange does not have to start from zero.
+
+The point is to help me decide, not require a workout. Rest is a valid plan,
+and I choose whether to act on the suggestions.
+
+[<img src="assets/linebot/sample-1.jpg" alt="Morning check-ins followed by a recovery update and a record of yesterday's bike ride" width="320" />](assets/linebot/sample-1.jpg)
+
+This is a personal tool, not a medical or certified coaching service. I review
+extracted values and suggestions; records are written before that review,
+not held behind an approval step.
 
 ## Architecture
 
@@ -89,9 +145,12 @@ values remain model outputs that the user needs to review.
 
 ## Engineering notes
 
+The conversational interface is flexible; the rules underneath it are more
+deliberate. These are the main choices behind the interactions above:
+
 - **Stack:** Python 3.12, FastAPI, SQLAlchemy async, LiteLLM, Gemini, LINE Messaging API, Supabase Postgres/Storage, Docker, and GitHub Actions.
 - **Fitness-specific data rules:** [workout services](src/services/workout.py) retain set groups, weight units, per-side loads, and session types. PR comparisons normalise weights and treat lower assistance as progress on assisted exercises; next weight targets follow a fixed increment rule.
-- **Queries across turns and tools:** [the message handler](src/line/handler.py) supplies recent conversation history and runs a bounded tool-calling loop. Exercise-name and alias searches let the model look up related variants before querying their records.
+- **Queries across turns and tools:** [the message handler](src/line/handler.py) supplies recent conversation history, so a follow-up can omit an exercise name, and allows up to three tool-calling rounds. SQL searches over exercise names, aliases, and muscle groups let the model look up related variants before querying their records, without adding a vector database for this structured catalogue.
 - **Context from stored state:** [prompt assembly](src/llm/prompts.py) includes the current date, profile, active goals, and pending daily interaction. Image-specific instructions are included when an image is being processed.
 - **Reliability from real failures:** missed records, date confusion, and empty replies led to broader search, explicit date context, retry tiers, and rule-based fallbacks. [Regression tests](tests/) cover assisted PRs, historical dates, multi-round tool calls, empty responses, and tool-syntax leakage into chat.
 - **Access and data lifecycle:** the LINE allowlist is fail-closed, and data tools receive the authenticated `user_id`. Chat history is retained for 7 days; raw inputs and daily interactions for 90 days. Photos live behind a storage interface, with metadata and storage keys in Postgres.
